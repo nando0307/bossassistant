@@ -1,7 +1,7 @@
 [project]
 name = "app"
 version = "0.1.0"
-description = "Add your description here"
+description = "BossAssistant: department-scoped RAG assistant (HR + Finance) with LangGraph routing"
 readme = "README.md"
 authors = [
     { name = "nando", email = "lenando0307@gmail.com" }
@@ -18,7 +18,6 @@ dependencies = [
     "uvicorn[standard]>=0.45.0",
 ]
 
-description = "BossAssistant: department-scoped RAG assistant (HR + Finance) with LangGraph routing"
 
 [build-system]
 requires = ["uv_build>=0.11.7,<0.12.0"]
