@@ -18,8 +18,7 @@ dependencies = [
     "uvicorn[standard]>=0.45.0",
 ]
 
-[project.scripts]
-app = "app:main"
+description = "BossAssistant: department-scoped RAG assistant (HR + Finance) with LangGraph routing"
 
 [build-system]
 requires = ["uv_build>=0.11.7,<0.12.0"]
