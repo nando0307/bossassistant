@@ -1,0 +1,65 @@
+:root {
+  --surface: #f6f7f4;
+  --panel: #ffffff;
+  --nav: #eef1ed;
+  --ink: #172033;
+  --muted: #647184;
+  --line: #dce2dd;
+  --line-strong: #c4cdc5;
+  --accent: #146c63;
+  --accent-soft: #e2f1ee;
+  --focus: rgba(20, 108, 99, 0.18);
+  --on-accent: #ffffff;
+  --positive: #2d7d46;
+  --danger: #9b2c2c;
+  --danger-soft: #fff1ef;
+  --danger-line: #f2c2bc;
+  --hr: #7a3f12;
+  --hr-soft: #fff0dc;
+  --hr-line: #efc995;
+  --finance: #214d96;
+  --finance-soft: #e8f0ff;
+  --finance-line: #bad0f5;
+  --both: #5f3a8f;
+  --both-soft: #f1e9ff;
+  --both-line: #d5c1f4;
+  font-family:
+    Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+    sans-serif;
+  color: var(--ink);
+  background: var(--surface);
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  background: var(--surface);
+}
+
+body {
+  min-width: 320px;
+  min-height: 100svh;
+  margin: 0;
+}
+
+button,
+textarea {
+  font: inherit;
+}
+
+button:focus-visible,
+textarea:focus-visible {
+  outline: 3px solid var(--focus);
+  outline-offset: 2px;
+}
+
+::selection {
+  color: var(--on-accent);
+  background: var(--accent);
+}
