@@ -40,6 +40,7 @@ class Settings(BaseSettings):
 
     # --- NVIDIA AI Endpoints ---
     nvidia_api_key: SecretStr = Field(...)
+    enable_reranker: bool = False
 
     # --- LangSmith (optional, for tracing) ---
     langsmith_api_key: SecretStr | None = None
@@ -63,8 +64,7 @@ def get_settings() -> Settings:
     Subsequent calls return the same object — fast, and ensures we don't
     reload .env on every import.
     """
-    return Settings()
+    return Settings()  # type: ignore[call-arg]
 
 
 settings = get_settings()
-

@@ -12,8 +12,12 @@ upstream blips.
 """
 from __future__ import annotations
 
-from fastapi import FastAPI, Response, status
+from typing import Literal
 
+from fastapi import FastAPI, Response, status
+from pydantic import BaseModel, Field
+
+from app.agents.router import answer_question
 from app.config import settings
 from app.db import verify_connectivity
 
@@ -22,6 +26,24 @@ app = FastAPI(
     description="Department-scoped RAG assistant (HR + Finance).",
     version="0.1.0",
 )
+
+
+class AskRequest(BaseModel):
+    question: str = Field(..., min_length=1)
+    department: Literal["hr", "finance"] | None = None
+
+
+class Source(BaseModel):
+    source: str | None = None
+    title: str | None = None
+    department: str | None = None
+    preview: str | None = None
+
+
+class AskResponse(BaseModel):
+    answer: str
+    sources: list[Source]
+    department_routed: Literal["hr", "finance", "both"]
 
 
 @app.get("/health")
@@ -44,3 +66,14 @@ def ready(response: Response) -> dict[str, str]:
         return {"status": "ready", "neo4j": "ok"}
     response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE
     return {"status": "not_ready", "neo4j": "down"}
+
+
+@app.post("/ask", response_model=AskResponse)
+def ask(request: AskRequest) -> AskResponse:
+    """Answer a question using the department-scoped RAG pipeline."""
+    result = answer_question(request.question, request.department)
+    return AskResponse(
+        answer=result["answer"],
+        sources=[Source(**source) for source in result["sources"]],
+        department_routed=result["department_routed"],
+    )
