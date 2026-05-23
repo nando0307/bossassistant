@@ -47,6 +47,12 @@ class Settings(BaseSettings):
     langsmith_tracing: bool = False
     langsmith_project: str = "bossassistant"
 
+    # --- Langfuse (optional, for LLM observability) ---
+    langfuse_tracing: bool = False
+    langfuse_public_key: SecretStr | None = None
+    langfuse_secret_key: SecretStr | None = None
+    langfuse_host: str = "https://cloud.langfuse.com"
+
     # --- CORS ---
     cors_origins: str = Field(default="http://localhost:3000,http://localhost:5173")
 

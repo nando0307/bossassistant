@@ -14,6 +14,7 @@ from langchain_nvidia_ai_endpoints import ChatNVIDIA, NVIDIAEmbeddings
 from sentence_transformers import CrossEncoder
 
 from app.config import settings
+from app.observability import langchain_config
 
 Department = Literal["hr", "finance"]
 
@@ -108,7 +109,12 @@ def parse_queries(text: str) -> list[str]:
 
 def generate_queries(question: str) -> list[str]:
     chain = ChatPromptTemplate.from_template(MULTI_QUERY_TEMPLATE) | get_llm() | StrOutputParser()
-    return parse_queries(chain.invoke({"question": question}))
+    return parse_queries(
+        chain.invoke(
+            {"question": question},
+            config=langchain_config("multi_query_generation"),
+        )
+    )
 
 
 def reciprocal_rank_fusion(results: list[list[Document]], k: int = 60) -> list[Document]:
@@ -176,6 +182,10 @@ def answer_department(question: str, department: Department) -> tuple[str, list[
             "department": INDEX_CONFIG[department]["department_name"],
             "context": format_docs(docs),
             "question": question,
-        }
+        },
+        config=langchain_config(
+            "department_answer",
+            {"department": department, "source_count": len(docs)},
+        ),
     )
     return answer, docs

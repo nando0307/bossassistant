@@ -6,6 +6,7 @@ from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import ChatPromptTemplate
 from pydantic import BaseModel, Field
 
+from app.observability import langchain_config
 from app.retrieval.rag import Department, answer_department, format_sources, get_llm
 
 
@@ -57,7 +58,13 @@ def route_question(question: str) -> Literal["hr", "finance", "both"]:
         ]
     )
     structured_llm = get_llm().with_structured_output(RouteQuery)
-    route = cast(RouteQuery, (prompt | structured_llm).invoke({"question": question}))
+    route = cast(
+        RouteQuery,
+        (prompt | structured_llm).invoke(
+            {"question": question},
+            config=langchain_config("department_router"),
+        ),
+    )
     return route.department
 
 
@@ -87,7 +94,8 @@ def answer_question(question: str, department: Department | None = None) -> AskR
             "question": question,
             "hr": hr_answer,
             "finance": finance_answer,
-        }
+        },
+        config=langchain_config("both_department_synthesis"),
     )
     return {
         "answer": answer,
