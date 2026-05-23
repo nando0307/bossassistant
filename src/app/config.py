@@ -40,6 +40,7 @@ class Settings(BaseSettings):
 
     # --- NVIDIA AI Endpoints ---
     nvidia_api_key: SecretStr = Field(...)
+    enable_multi_query: bool = False
     enable_reranker: bool = False
 
     # --- LangSmith (optional, for tracing) ---

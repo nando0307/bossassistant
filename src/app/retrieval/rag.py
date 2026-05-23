@@ -148,7 +148,8 @@ def retrieve(
     final_k: int = 4,
 ) -> list[Document]:
     vector_store = get_vector_store(department)
-    all_queries = [question, *generate_queries(question)]
+    alt_queries = generate_queries(question) if settings.enable_multi_query else []
+    all_queries = [question, *alt_queries]
     results = [vector_store.similarity_search(query, k=retrieval_candidates) for query in all_queries]
     fused = reciprocal_rank_fusion(results)
     return rerank(question, fused[:retrieval_candidates], top_k=final_k)

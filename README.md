@@ -113,6 +113,7 @@ NEO4J_USER=
 NEO4J_PASSWORD=
 NEO4J_DATABASE=
 NVIDIA_API_KEY=
+ENABLE_MULTI_QUERY=false
 LANGSMITH_API_KEY=
 LANGSMITH_TRACING=
 LANGSMITH_PROJECT=
@@ -155,11 +156,12 @@ NVIDIA LLM answer generation
 
 Retrieval flow:
 
-1. Generate alternate queries from the user question.
-2. Run Neo4j hybrid search for each query.
-3. Merge ranked results with Reciprocal Rank Fusion.
-4. Optionally rerank with `BAAI/bge-reranker-large`.
-5. Generate a grounded answer using retrieved policy chunks.
+1. Retrieve relevant chunks from Neo4j hybrid search.
+2. Optionally generate alternate queries and merge ranked results with Reciprocal Rank Fusion.
+3. Optionally rerank with `BAAI/bge-reranker-large`.
+4. Generate a grounded answer using retrieved policy chunks.
+
+`ENABLE_MULTI_QUERY=false` is the default for deployed latency. Set it to `true` for notebook-faithful multi-query retrieval experiments.
 
 When Langfuse is enabled, BossAssistant traces key LangChain runs:
 
