@@ -63,10 +63,10 @@ INDEX_CONFIG: dict[Department, dict[str, str]] = {
 @lru_cache(maxsize=1)
 def get_llm() -> ChatNVIDIA:
     return ChatNVIDIA(
-        model="qwen/qwen3-next-80b-a3b-instruct",
+        model=settings.nvidia_chat_model,
         nvidia_api_key=settings.nvidia_api_key.get_secret_value(),
         temperature=0,
-        max_completion_tokens=1024,
+        max_completion_tokens=settings.nvidia_max_tokens,
     )
 
 
@@ -186,7 +186,7 @@ def answer_department(question: str, department: Department) -> tuple[str, list[
         },
         config=langchain_config(
             "department_answer",
-            {"department": department, "source_count": len(docs)},
+            {"department": department, "source_count": str(len(docs))},
         ),
     )
     return answer, docs

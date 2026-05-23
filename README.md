@@ -113,6 +113,8 @@ NEO4J_USER=
 NEO4J_PASSWORD=
 NEO4J_DATABASE=
 NVIDIA_API_KEY=
+NVIDIA_CHAT_MODEL=meta/llama-3.1-8b-instruct
+NVIDIA_MAX_TOKENS=384
 ENABLE_MULTI_QUERY=false
 LANGSMITH_API_KEY=
 LANGSMITH_TRACING=
@@ -162,6 +164,8 @@ Retrieval flow:
 4. Generate a grounded answer using retrieved policy chunks.
 
 `ENABLE_MULTI_QUERY=false` is the default for deployed latency. Set it to `true` for notebook-faithful multi-query retrieval experiments.
+
+`NVIDIA_CHAT_MODEL` defaults to `meta/llama-3.1-8b-instruct` for production latency. The original notebook model, `qwen/qwen3-next-80b-a3b-instruct`, can be used for higher-capacity experiments.
 
 When Langfuse is enabled, BossAssistant traces key LangChain runs:
 
