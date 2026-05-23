@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 import re
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import Future, ThreadPoolExecutor
 from typing import Literal, TypedDict, cast
 
 from langchain_core.output_parsers import StrOutputParser
@@ -95,10 +95,35 @@ FINANCE_TERMS = {
     "travel",
 }
 
+VAGUE_PATTERNS = (
+    "how much do i get",
+    "what is the deadline",
+    "do i need approval",
+    "what happens if i submit it late",
+)
+
 
 def _contains_any(text: str, terms: set[str]) -> bool:
     lowered = text.lower()
     return any(term in lowered for term in terms)
+
+
+def is_vague_subquestion(question: str) -> bool:
+    normalized = question.lower().strip(" ?.!")
+    if normalized in VAGUE_PATTERNS:
+        return True
+    return not _contains_any(question, HR_TERMS) and not _contains_any(question, FINANCE_TERMS)
+
+
+def split_user_questions(question: str) -> list[str]:
+    chunks = [
+        chunk.strip()
+        for chunk in re.findall(r"[^?.!]+[?.!]?", question)
+        if chunk.strip()
+    ]
+    if len(chunks) <= 1:
+        return []
+    return chunks
 
 
 def route_question_fast(question: str) -> Literal["hr", "finance", "both"] | None:
@@ -189,7 +214,7 @@ def split_department_questions(question: str) -> DepartmentQuestions:
         )
 
 
-def answer_question(question: str, department: Department | None = None) -> AskResult:
+def _answer_single_question(question: str, department: Department | None = None) -> AskResult:
     if department is not None:
         answer, docs = answer_department(question, department)
         return {
@@ -224,3 +249,45 @@ def answer_question(question: str, department: Department | None = None) -> AskR
         "sources": format_sources([*hr_docs, *finance_docs]),
         "department_routed": "both",
     }
+
+
+def answer_question(question: str, department: Department | None = None) -> AskResult:
+    subquestions = split_user_questions(question) if department is None else []
+    if len(subquestions) > 1:
+        answers: list[str] = []
+        sources: list[dict[str, str | None]] = []
+        routed_departments: set[Literal["hr", "finance", "both"]] = set()
+
+        with ThreadPoolExecutor(max_workers=min(len(subquestions), 4)) as executor:
+            futures: list[Future[AskResult] | None] = []
+            for subquestion in subquestions:
+                if is_vague_subquestion(subquestion):
+                    futures.append(None)
+                else:
+                    futures.append(executor.submit(_answer_single_question, subquestion))
+            for index, (subquestion, future) in enumerate(zip(subquestions, futures, strict=True), start=1):
+                if future is None:
+                    answers.append(
+                        f"{index}. {subquestion}\nPlease clarify what this question refers to, or ask it with the policy topic included."
+                    )
+                    continue
+
+                result = future.result()
+                answers.append(f"{index}. {subquestion}\n{result['answer']}")
+                sources.extend(result["sources"])
+                routed_departments.add(result["department_routed"])
+
+        if routed_departments == {"hr"}:
+            routed: Literal["hr", "finance", "both"] = "hr"
+        elif routed_departments == {"finance"}:
+            routed = "finance"
+        else:
+            routed = "both"
+
+        return {
+            "answer": "\n\n".join(answers),
+            "sources": sources,
+            "department_routed": routed,
+        }
+
+    return _answer_single_question(question, department)
