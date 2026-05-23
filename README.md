@@ -199,6 +199,26 @@ Frontend:
 - Output directory: `dist`
 - `VITE_API_URL` points to the Railway API URL.
 
+## Roadmap
+
+### Retrieval Modes
+
+Production defaults to a low-latency path so the deployed app stays usable:
+
+```env
+ENABLE_MULTI_QUERY=false
+ENABLE_RERANKER=false
+NVIDIA_CHAT_MODEL=meta/llama-3.1-8b-instruct
+```
+
+Planned next step:
+
+- Add explicit request modes: `"fast"` and `"deep"`.
+- Use `"fast"` for the default deployed UI.
+- Use `"deep"` for RAGAS evaluation and portfolio writeups.
+- In `"deep"` mode, re-enable multi-query retrieval and reranking.
+- Replace the local `BAAI/bge-reranker-large` cross-encoder with a hosted reranker before making deep mode production-default.
+
 ## Development Checks
 
 Backend:

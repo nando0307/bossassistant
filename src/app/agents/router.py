@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from typing import Literal, TypedDict, cast
 
 from langchain_core.output_parsers import StrOutputParser
@@ -24,6 +25,19 @@ class RouteQuery(BaseModel):
     )
 
 
+class DepartmentQuestions(BaseModel):
+    """Split a cross-department question into department-specific questions."""
+
+    hr_question: str = Field(
+        ...,
+        description="The part of the user's question that HR should answer.",
+    )
+    finance_question: str = Field(
+        ...,
+        description="The part of the user's question that Finance should answer.",
+    )
+
+
 class AskResult(TypedDict):
     answer: str
     sources: list[dict[str, str | None]]
@@ -37,17 +51,15 @@ ROUTER_SYSTEM = """You are a router that decides which department's assistant sh
 
 If a question requires information from BOTH departments, return 'both'."""
 
-SYNTHESIS_TEMPLATE = """The user asked a question that spans HR and Finance. Synthesize the two department answers below into a single coherent response. If they contradict, note it.
+SPLIT_SYSTEM = """You split cross-department employee policy questions into two focused questions.
 
-User question: {question}
+- HR should receive only HR topics such as PTO, leave, benefits, remote work, onboarding, performance, wellness, and conduct.
+- Finance should receive only Finance topics such as expenses, travel budgets, reimbursement, procurement, accounts payable, cards, and reporting.
 
-HR answer:
-{hr}
+Keep each split question concise and answerable by that department's policy documents.
 
-Finance answer:
-{finance}
-
-Final synthesized answer:"""
+Return only JSON with this exact shape:
+{{"hr_question":"...","finance_question":"..."}}"""
 
 
 def route_question(question: str) -> Literal["hr", "finance", "both"]:
@@ -68,6 +80,27 @@ def route_question(question: str) -> Literal["hr", "finance", "both"]:
     return route.department
 
 
+def split_department_questions(question: str) -> DepartmentQuestions:
+    prompt = ChatPromptTemplate.from_messages(
+        [
+            ("system", SPLIT_SYSTEM),
+            ("human", "{question}"),
+        ]
+    )
+    output = (prompt | get_llm() | StrOutputParser()).invoke(
+        {"question": question},
+        config=langchain_config("department_question_split"),
+    )
+    try:
+        parsed = json.loads(output)
+        return DepartmentQuestions.model_validate(parsed)
+    except (json.JSONDecodeError, ValueError):
+        return DepartmentQuestions(
+            hr_question=question,
+            finance_question=question,
+        )
+
+
 def answer_question(question: str, department: Department | None = None) -> AskResult:
     if department is not None:
         answer, docs = answer_department(question, department)
@@ -86,16 +119,14 @@ def answer_question(question: str, department: Department | None = None) -> AskR
             "department_routed": route,
         }
 
-    hr_answer, hr_docs = answer_department(question, "hr")
-    finance_answer, finance_docs = answer_department(question, "finance")
-    prompt = ChatPromptTemplate.from_template(SYNTHESIS_TEMPLATE)
-    answer = (prompt | get_llm() | StrOutputParser()).invoke(
-        {
-            "question": question,
-            "hr": hr_answer,
-            "finance": finance_answer,
-        },
-        config=langchain_config("both_department_synthesis"),
+    split_questions = split_department_questions(question)
+    hr_answer, hr_docs = answer_department(split_questions.hr_question, "hr")
+    finance_answer, finance_docs = answer_department(split_questions.finance_question, "finance")
+    answer = (
+        "HR:\n"
+        f"{hr_answer}\n\n"
+        "Finance:\n"
+        f"{finance_answer}"
     )
     return {
         "answer": answer,
