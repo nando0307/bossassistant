@@ -15,6 +15,7 @@ from __future__ import annotations
 from typing import Literal
 
 from fastapi import FastAPI, Response, status
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
 from app.agents.router import answer_question
@@ -25,6 +26,13 @@ app = FastAPI(
     title="BossAssistant API",
     description="Department-scoped RAG assistant (HR + Finance).",
     version="0.1.0",
+)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=settings.cors_origins_list,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 
