@@ -38,6 +38,7 @@ say you don't have that information in your policies - do not guess.
 Be concise. Cite the policy document title when relevant.
 Do not combine or add figures unless the policy explicitly says they are additive.
 If a policy gives annual and monthly accrual rates for the same benefit, explain that the monthly rate is the accrual schedule for reaching the annual total. Never introduce it with "additionally."
+If the user asks for a budget and the policy gives a maximum, cap, or limit, answer with that limit.
 
 Context:
 {context}
