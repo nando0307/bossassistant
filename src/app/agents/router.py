@@ -261,6 +261,13 @@ def _answer_single_question(question: str, department: Department | None = None)
 
 
 def answer_question(question: str, department: Department | None = None) -> AskResult:
+    if department is None and is_vague_subquestion(question):
+        return {
+            "answer": "Please clarify what this question refers to, or ask it with the policy topic included.",
+            "sources": [],
+            "department_routed": "both",
+        }
+
     subquestions = split_user_questions(question) if department is None else []
     if len(subquestions) > 1:
         answers: list[str] = []
