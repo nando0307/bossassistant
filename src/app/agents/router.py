@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import re
+from concurrent.futures import ThreadPoolExecutor
 from typing import Literal, TypedDict, cast
 
 from langchain_core.output_parsers import StrOutputParser
@@ -61,8 +63,62 @@ Keep each split question concise and answerable by that department's policy docu
 Return only JSON with this exact shape:
 {{"hr_question":"...","finance_question":"..."}}"""
 
+HR_TERMS = {
+    "benefit",
+    "conduct",
+    "harassment",
+    "health",
+    "hr",
+    "leave",
+    "onboarding",
+    "parental",
+    "performance",
+    "pto",
+    "remote",
+    "vacation",
+    "wellness",
+}
+
+FINANCE_TERMS = {
+    "ap",
+    "budget",
+    "card",
+    "expense",
+    "finance",
+    "hotel",
+    "invoice",
+    "payment",
+    "per diem",
+    "procurement",
+    "purchase",
+    "reimbursement",
+    "travel",
+}
+
+
+def _contains_any(text: str, terms: set[str]) -> bool:
+    lowered = text.lower()
+    return any(term in lowered for term in terms)
+
+
+def route_question_fast(question: str) -> Literal["hr", "finance", "both"] | None:
+    has_hr = _contains_any(question, HR_TERMS)
+    has_finance = _contains_any(question, FINANCE_TERMS)
+
+    if has_hr and has_finance:
+        return "both"
+    if has_hr:
+        return "hr"
+    if has_finance:
+        return "finance"
+    return None
+
 
 def route_question(question: str) -> Literal["hr", "finance", "both"]:
+    fast_route = route_question_fast(question)
+    if fast_route is not None:
+        return fast_route
+
     prompt = ChatPromptTemplate.from_messages(
         [
             ("system", ROUTER_SYSTEM),
@@ -80,7 +136,39 @@ def route_question(question: str) -> Literal["hr", "finance", "both"]:
     return route.department
 
 
+def split_department_questions_fast(question: str) -> DepartmentQuestions | None:
+    chunks = [
+        chunk.strip()
+        for chunk in re.findall(r"[^?.!]+[?.!]?", question)
+        if chunk.strip()
+    ]
+    if len(chunks) < 2:
+        return None
+
+    hr_chunks: list[str] = []
+    finance_chunks: list[str] = []
+
+    for chunk in chunks:
+        has_hr = _contains_any(chunk, HR_TERMS)
+        has_finance = _contains_any(chunk, FINANCE_TERMS)
+        if has_hr and not has_finance:
+            hr_chunks.append(chunk)
+        elif has_finance and not has_hr:
+            finance_chunks.append(chunk)
+
+    if hr_chunks and finance_chunks:
+        return DepartmentQuestions(
+            hr_question=" ".join(hr_chunks),
+            finance_question=" ".join(finance_chunks),
+        )
+    return None
+
+
 def split_department_questions(question: str) -> DepartmentQuestions:
+    fast_split = split_department_questions_fast(question)
+    if fast_split is not None:
+        return fast_split
+
     prompt = ChatPromptTemplate.from_messages(
         [
             ("system", SPLIT_SYSTEM),
@@ -120,14 +208,17 @@ def answer_question(question: str, department: Department | None = None) -> AskR
         }
 
     split_questions = split_department_questions(question)
-    hr_answer, hr_docs = answer_department(split_questions.hr_question, "hr")
-    finance_answer, finance_docs = answer_department(split_questions.finance_question, "finance")
-    answer = (
-        "HR:\n"
-        f"{hr_answer}\n\n"
-        "Finance:\n"
-        f"{finance_answer}"
-    )
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        hr_future = executor.submit(answer_department, split_questions.hr_question, "hr")
+        finance_future = executor.submit(
+            answer_department,
+            split_questions.finance_question,
+            "finance",
+        )
+        hr_answer, hr_docs = hr_future.result()
+        finance_answer, finance_docs = finance_future.result()
+
+    answer = "HR:\n" f"{hr_answer}\n\n" "Finance:\n" f"{finance_answer}"
     return {
         "answer": answer,
         "sources": format_sources([*hr_docs, *finance_docs]),
