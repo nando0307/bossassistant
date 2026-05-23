@@ -116,10 +116,19 @@ def is_vague_subquestion(question: str) -> bool:
 
 
 def split_user_questions(question: str) -> list[str]:
+    normalized = " ".join(question.split())
+    numbered_parts = [
+        part.strip(" .")
+        for part in re.split(r"(?:^|\s)\d+[.)]\s+", normalized)
+        if part.strip(" .")
+    ]
+    if len(numbered_parts) > 1:
+        return numbered_parts
+
     chunks = [
         chunk.strip()
-        for chunk in re.findall(r"[^?.!]+[?.!]?", question)
-        if chunk.strip()
+        for chunk in re.findall(r"[^?]+\?", question)
+        if chunk.strip(" .")
     ]
     if len(chunks) <= 1:
         return []
