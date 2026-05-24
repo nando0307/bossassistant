@@ -41,7 +41,7 @@ class Settings(BaseSettings):
     # --- NVIDIA AI Endpoints ---
     nvidia_api_key: SecretStr = Field(...)
     nvidia_chat_model: str = "qwen/qwen3-next-80b-a3b-instruct"
-    nvidia_deep_chat_model: str = "moonshotai/kimi-k2-instruct"
+    nvidia_deep_chat_model: str = "moonshotai/kimi-k2.6"
     nvidia_max_tokens: int = 384
     enable_reranker: bool = False
 

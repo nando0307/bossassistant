@@ -71,7 +71,7 @@ Production defaults to a fast configuration:
 ```env
 ENABLE_RERANKER=false
 NVIDIA_CHAT_MODEL=qwen/qwen3-next-80b-a3b-instruct
-NVIDIA_DEEP_CHAT_MODEL=moonshotai/kimi-k2-instruct
+NVIDIA_DEEP_CHAT_MODEL=moonshotai/kimi-k2.6
 NVIDIA_MAX_TOKENS=384
 ```
 

@@ -130,7 +130,7 @@ NEO4J_PASSWORD=
 NEO4J_DATABASE=
 NVIDIA_API_KEY=
 NVIDIA_CHAT_MODEL=qwen/qwen3-next-80b-a3b-instruct
-NVIDIA_DEEP_CHAT_MODEL=moonshotai/kimi-k2-instruct
+NVIDIA_DEEP_CHAT_MODEL=moonshotai/kimi-k2.6
 NVIDIA_MAX_TOKENS=384
 LANGSMITH_API_KEY=
 LANGSMITH_TRACING=
@@ -234,7 +234,7 @@ Production defaults to a low-latency path so the deployed app stays usable:
 ```env
 ENABLE_RERANKER=false
 NVIDIA_CHAT_MODEL=qwen/qwen3-next-80b-a3b-instruct
-NVIDIA_DEEP_CHAT_MODEL=moonshotai/kimi-k2-instruct
+NVIDIA_DEEP_CHAT_MODEL=moonshotai/kimi-k2.6
 ```
 
 Current mode behavior:
