@@ -127,8 +127,8 @@ def parse_queries(text: str) -> list[str]:
     return [match.group(1).strip() for line in text.splitlines() if (match := pattern.match(line))]
 
 
-def generate_queries(question: str, mode: RetrievalMode = "deep") -> list[str]:
-    chain = ChatPromptTemplate.from_template(MULTI_QUERY_TEMPLATE) | get_llm_for_mode(mode) | StrOutputParser()
+def generate_queries(question: str) -> list[str]:
+    chain = ChatPromptTemplate.from_template(MULTI_QUERY_TEMPLATE) | get_llm() | StrOutputParser()
     return parse_queries(
         chain.invoke(
             {"question": question},
@@ -169,7 +169,7 @@ def retrieve(
     final_k: int = 4,
 ) -> list[Document]:
     vector_store = get_vector_store(department)
-    alt_queries = generate_queries(question, mode=mode) if mode == "deep" else []
+    alt_queries = generate_queries(question) if mode == "deep" else []
     all_queries = [question, *alt_queries]
     results = [vector_store.similarity_search(query, k=retrieval_candidates) for query in all_queries]
     fused = reciprocal_rank_fusion(results)

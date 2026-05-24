@@ -78,7 +78,7 @@ NVIDIA_MAX_TOKENS=384
 The API now exposes request modes:
 
 - `fast`: default deployed app path
-- `deep`: Kimi-backed multi-query retrieval, plus reranking when `ENABLE_RERANKER=true`
+- `deep`: multi-query retrieval with Kimi-backed answer generation, plus reranking when `ENABLE_RERANKER=true`
 
 ## Evaluation
 

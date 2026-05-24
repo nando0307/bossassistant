@@ -26,6 +26,7 @@ def ask(
     mode: str,
     retries: int,
     retry_delay: float,
+    timeout: float,
 ) -> tuple[dict[str, Any], float, int]:
     payload = json.dumps({"question": question, "department": department, "mode": mode}).encode("utf-8")
     request = urllib.request.Request(
@@ -39,7 +40,7 @@ def ask(
 
     for attempt in range(1, retries + 2):
         try:
-            with urllib.request.urlopen(request, timeout=90) as response:
+            with urllib.request.urlopen(request, timeout=timeout) as response:
                 elapsed = time.perf_counter() - started
                 return json.loads(response.read().decode("utf-8")), elapsed, attempt
         except (TimeoutError, urllib.error.URLError) as exc:
@@ -69,7 +70,13 @@ def present_forbidden_terms(answer: str, forbidden_terms: list[str]) -> list[str
     return [term for term in forbidden_terms if term.lower() in lowered]
 
 
-def evaluate_case(case: dict[str, Any], api_url: str, retries: int, retry_delay: float) -> dict[str, Any]:
+def evaluate_case(
+    case: dict[str, Any],
+    api_url: str,
+    retries: int,
+    retry_delay: float,
+    timeout: float,
+) -> dict[str, Any]:
     started = time.perf_counter()
     try:
         response, latency_seconds, attempts = ask(
@@ -79,6 +86,7 @@ def evaluate_case(case: dict[str, Any], api_url: str, retries: int, retry_delay:
             case.get("mode", "fast"),
             retries,
             retry_delay,
+            timeout,
         )
         expected_sources = set(case.get("expected_sources", []))
         actual_sources = source_ids(response)
@@ -124,13 +132,18 @@ def main() -> None:
     parser.add_argument("--mode", choices=["fast", "deep"], default="fast")
     parser.add_argument("--retries", type=int, default=2)
     parser.add_argument("--retry-delay", type=float, default=1.0)
+    parser.add_argument("--timeout", type=float, default=30.0)
+    parser.add_argument("--limit", type=int, default=None)
     args = parser.parse_args()
 
     cases = load_cases(args.cases)
+    if args.limit is not None:
+        cases = cases[: args.limit]
     args.output.parent.mkdir(parents=True, exist_ok=True)
 
     results = [
-        evaluate_case({**case, "mode": args.mode}, args.api_url, args.retries, args.retry_delay) for case in cases
+        evaluate_case({**case, "mode": args.mode}, args.api_url, args.retries, args.retry_delay, args.timeout)
+        for case in cases
     ]
     args.output.write_text("\n".join(json.dumps(result) for result in results) + "\n")
 

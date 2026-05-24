@@ -191,7 +191,7 @@ Routing behavior:
 
 Fast mode is the default for deployed latency. Use request-level `"mode": "deep"` for notebook-faithful multi-query retrieval experiments.
 
-`NVIDIA_CHAT_MODEL` controls fast/default answer generation and routing. `NVIDIA_DEEP_CHAT_MODEL` controls deep-mode multi-query generation and answer generation.
+`NVIDIA_CHAT_MODEL` controls fast/default answer generation, routing, and multi-query generation. `NVIDIA_DEEP_CHAT_MODEL` controls deep-mode answer generation.
 
 When Langfuse is enabled, BossAssistant traces key LangChain runs:
 
@@ -242,7 +242,7 @@ Current mode behavior:
 - Use `"fast"` for the default deployed UI.
 - Use `"deep"` for RAGAS evaluation and portfolio writeups.
 - In `"deep"` mode, multi-query retrieval is enabled for that request.
-- In `"deep"` mode, BossAssistant uses `NVIDIA_DEEP_CHAT_MODEL`.
+- In `"deep"` mode, BossAssistant uses `NVIDIA_DEEP_CHAT_MODEL` for final answer generation.
 - Reranking runs in `"deep"` mode when `ENABLE_RERANKER=true`.
 - Replace the local `BAAI/bge-reranker-large` cross-encoder with a hosted reranker before making deep mode production-default.
 
@@ -260,6 +260,12 @@ Run against the deployed Railway API:
 
 ```bash
 uv run python scripts/run_eval.py --api-url https://bossassistant-production.up.railway.app --mode fast
+```
+
+Run a small deep-mode smoke eval with a bounded request timeout:
+
+```bash
+uv run python scripts/run_eval.py --api-url https://bossassistant-production.up.railway.app --mode deep --limit 2 --timeout 45
 ```
 
 The script records:
