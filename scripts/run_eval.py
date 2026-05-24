@@ -23,10 +23,11 @@ def ask(
     api_url: str,
     question: str,
     department: str | None,
+    mode: str,
     retries: int,
     retry_delay: float,
 ) -> tuple[dict[str, Any], float, int]:
-    payload = json.dumps({"question": question, "department": department}).encode("utf-8")
+    payload = json.dumps({"question": question, "department": department, "mode": mode}).encode("utf-8")
     request = urllib.request.Request(
         f"{api_url.rstrip('/')}/ask",
         data=payload,
@@ -75,6 +76,7 @@ def evaluate_case(case: dict[str, Any], api_url: str, retries: int, retry_delay:
             api_url,
             case["question"],
             case.get("department"),
+            case.get("mode", "fast"),
             retries,
             retry_delay,
         )
@@ -89,6 +91,7 @@ def evaluate_case(case: dict[str, Any], api_url: str, retries: int, retry_delay:
         return {
             "id": case["id"],
             "ok": True,
+            "mode": case.get("mode", "fast"),
             "attempts": attempts,
             "latency_seconds": round(latency_seconds, 3),
             "department_expected": case["expected_department"],
@@ -118,6 +121,7 @@ def main() -> None:
     parser.add_argument("--api-url", default="http://127.0.0.1:8000")
     parser.add_argument("--cases", type=Path, default=Path("evals/questions.jsonl"))
     parser.add_argument("--output", type=Path, default=Path("evals/results.jsonl"))
+    parser.add_argument("--mode", choices=["fast", "deep"], default="fast")
     parser.add_argument("--retries", type=int, default=2)
     parser.add_argument("--retry-delay", type=float, default=1.0)
     args = parser.parse_args()
@@ -125,7 +129,9 @@ def main() -> None:
     cases = load_cases(args.cases)
     args.output.parent.mkdir(parents=True, exist_ok=True)
 
-    results = [evaluate_case(case, args.api_url, args.retries, args.retry_delay) for case in cases]
+    results = [
+        evaluate_case({**case, "mode": args.mode}, args.api_url, args.retries, args.retry_delay) for case in cases
+    ]
     args.output.write_text("\n".join(json.dumps(result) for result in results) + "\n")
 
     passed = sum(1 for result in results if result.get("ok"))

@@ -69,16 +69,15 @@ The original notebook used multi-query generation, Reciprocal Rank Fusion, and l
 Production defaults to a fast configuration:
 
 ```env
-ENABLE_MULTI_QUERY=false
 ENABLE_RERANKER=false
 NVIDIA_CHAT_MODEL=meta/llama-3.1-8b-instruct
 NVIDIA_MAX_TOKENS=384
 ```
 
-The planned next version is to expose request modes:
+The API now exposes request modes:
 
 - `fast`: default deployed app path
-- `deep`: multi-query plus reranking for evaluation and portfolio experiments
+- `deep`: multi-query retrieval, plus reranking when `ENABLE_RERANKER=true`
 
 ## Evaluation
 
@@ -144,7 +143,6 @@ avg_latency_seconds=1.98
 
 ## Future Work
 
-- Add explicit `fast` and `deep` request modes
 - Add RAGAS or LLM-as-judge scoring for answer faithfulness
 - Replace local reranking with a hosted reranker for production deep mode
 - Add document ingestion CLI for new policy files

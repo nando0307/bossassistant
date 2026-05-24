@@ -42,7 +42,6 @@ class Settings(BaseSettings):
     nvidia_api_key: SecretStr = Field(...)
     nvidia_chat_model: str = "meta/llama-3.1-8b-instruct"
     nvidia_max_tokens: int = 384
-    enable_multi_query: bool = False
     enable_reranker: bool = False
 
     # --- LangSmith (optional, for tracing) ---

@@ -5,9 +5,11 @@ import {
   CheckCircle2,
   CircleDollarSign,
   FileText,
+  Gauge,
   Loader2,
   Send,
   ShieldCheck,
+  Telescope,
   Sparkles,
   UserRound,
 } from 'lucide-react'
@@ -17,6 +19,7 @@ import './App.css'
 
 type Department = 'hr' | 'finance'
 type DepartmentChoice = Department | 'auto'
+type RetrievalMode = 'fast' | 'deep'
 
 type Source = {
   source: string | null
@@ -35,6 +38,7 @@ type ConversationItem = {
   id: number
   question: string
   answer: string
+  mode: RetrievalMode
   routed: AskResponse['department_routed']
   sources: Source[]
 }
@@ -58,6 +62,7 @@ function departmentLabel(department: AskResponse['department_routed']) {
 function App() {
   const [question, setQuestion] = useState('')
   const [department, setDepartment] = useState<DepartmentChoice>('auto')
+  const [mode, setMode] = useState<RetrievalMode>('fast')
   const [conversation, setConversation] = useState<ConversationItem[]>([])
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -80,6 +85,7 @@ function App() {
         body: JSON.stringify({
           question: nextQuestion,
           department: selectedDepartment,
+          mode,
         }),
       })
 
@@ -93,6 +99,7 @@ function App() {
           id: Date.now(),
           question: nextQuestion,
           answer: data.answer,
+          mode,
           routed: data.department_routed,
           sources: data.sources,
         },
@@ -186,6 +193,26 @@ function App() {
             })}
           </div>
 
+          <div className="mode-toggle" aria-label="Retrieval mode">
+            {[
+              { value: 'fast', label: 'Fast', icon: Gauge },
+              { value: 'deep', label: 'Deep', icon: Telescope },
+            ].map((item) => {
+              const Icon = item.icon
+              return (
+                <button
+                  className={mode === item.value ? 'selected' : ''}
+                  key={item.value}
+                  onClick={() => setMode(item.value as RetrievalMode)}
+                  type="button"
+                >
+                  <Icon size={16} />
+                  <span>{item.label}</span>
+                </button>
+              )
+            })}
+          </div>
+
           <label className="question-box">
             <span>Question</span>
             <textarea
@@ -243,7 +270,7 @@ function App() {
                   <p>{item.answer}</p>
                 </div>
                 <footer>
-                  Routed to {departmentLabel(item.routed)} ·{' '}
+                  {item.mode === 'fast' ? 'Fast' : 'Deep'} mode · Routed to {departmentLabel(item.routed)} ·{' '}
                   {item.sources.length} sources
                 </footer>
               </article>

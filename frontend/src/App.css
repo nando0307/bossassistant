@@ -160,13 +160,21 @@ h2 {
   gap: 8px;
 }
 
+.mode-toggle {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
 .department-toggle button,
+.mode-toggle button,
 .example-row button,
 .send-button {
   font: inherit;
 }
 
-.department-toggle button {
+.department-toggle button,
+.mode-toggle button {
   display: inline-flex;
   min-height: 38px;
   align-items: center;
@@ -180,12 +188,15 @@ h2 {
 }
 
 .department-toggle button:hover,
-.department-toggle button.selected {
+.department-toggle button.selected,
+.mode-toggle button:hover,
+.mode-toggle button.selected {
   color: var(--ink);
   border-color: var(--accent);
 }
 
-.department-toggle button.selected {
+.department-toggle button.selected,
+.mode-toggle button.selected {
   background: var(--accent-soft);
 }
 

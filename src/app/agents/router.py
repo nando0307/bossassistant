@@ -10,7 +10,7 @@ from langchain_core.prompts import ChatPromptTemplate
 from pydantic import BaseModel, Field
 
 from app.observability import langchain_config
-from app.retrieval.rag import Department, answer_department, format_sources, get_llm
+from app.retrieval.rag import Department, RetrievalMode, answer_department, format_sources, get_llm
 
 
 class RouteQuery(BaseModel):
@@ -223,9 +223,13 @@ def split_department_questions(question: str) -> DepartmentQuestions:
         )
 
 
-def _answer_single_question(question: str, department: Department | None = None) -> AskResult:
+def _answer_single_question(
+    question: str,
+    department: Department | None = None,
+    mode: RetrievalMode = "fast",
+) -> AskResult:
     if department is not None:
-        answer, docs = answer_department(question, department)
+        answer, docs = answer_department(question, department, mode=mode)
         return {
             "answer": answer,
             "sources": format_sources(docs),
@@ -234,7 +238,7 @@ def _answer_single_question(question: str, department: Department | None = None)
 
     route = route_question(question)
     if route in ("hr", "finance"):
-        answer, docs = answer_department(question, route)
+        answer, docs = answer_department(question, route, mode=mode)
         return {
             "answer": answer,
             "sources": format_sources(docs),
@@ -243,11 +247,12 @@ def _answer_single_question(question: str, department: Department | None = None)
 
     split_questions = split_department_questions(question)
     with ThreadPoolExecutor(max_workers=2) as executor:
-        hr_future = executor.submit(answer_department, split_questions.hr_question, "hr")
+        hr_future = executor.submit(answer_department, split_questions.hr_question, "hr", mode)
         finance_future = executor.submit(
             answer_department,
             split_questions.finance_question,
             "finance",
+            mode,
         )
         hr_answer, hr_docs = hr_future.result()
         finance_answer, finance_docs = finance_future.result()
@@ -260,7 +265,11 @@ def _answer_single_question(question: str, department: Department | None = None)
     }
 
 
-def answer_question(question: str, department: Department | None = None) -> AskResult:
+def answer_question(
+    question: str,
+    department: Department | None = None,
+    mode: RetrievalMode = "fast",
+) -> AskResult:
     if department is None and is_vague_subquestion(question):
         return {
             "answer": "Please clarify what this question refers to, or ask it with the policy topic included.",
@@ -280,7 +289,7 @@ def answer_question(question: str, department: Department | None = None) -> AskR
                 if is_vague_subquestion(subquestion):
                     futures.append(None)
                 else:
-                    futures.append(executor.submit(_answer_single_question, subquestion))
+                    futures.append(executor.submit(_answer_single_question, subquestion, None, mode))
             for index, (subquestion, future) in enumerate(zip(subquestions, futures, strict=True), start=1):
                 if future is None:
                     answers.append(
@@ -306,4 +315,4 @@ def answer_question(question: str, department: Department | None = None) -> AskR
             "department_routed": routed,
         }
 
-    return _answer_single_question(question, department)
+    return _answer_single_question(question, department, mode=mode)

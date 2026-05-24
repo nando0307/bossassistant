@@ -17,6 +17,7 @@ from app.config import settings
 from app.observability import langchain_config
 
 Department = Literal["hr", "finance"]
+RetrievalMode = Literal["fast", "deep"]
 
 MULTI_QUERY_TEMPLATE = """You are an AI language model assistant. Your task is to generate four
 different versions of the given user question to retrieve relevant documents from a vector
@@ -133,10 +134,10 @@ def reciprocal_rank_fusion(results: list[list[Document]], k: int = 60) -> list[D
     return [loads(doc_str) for doc_str, _ in reranked]
 
 
-def rerank(query: str, docs: list[Document], top_k: int = 4) -> list[Document]:
+def rerank(query: str, docs: list[Document], top_k: int = 4, mode: RetrievalMode = "fast") -> list[Document]:
     if not docs:
         return []
-    if not settings.enable_reranker:
+    if mode == "fast" or not settings.enable_reranker:
         return docs[:top_k]
 
     pairs = [(query, clean_page_content(doc.page_content)) for doc in docs]
@@ -148,15 +149,16 @@ def rerank(query: str, docs: list[Document], top_k: int = 4) -> list[Document]:
 def retrieve(
     question: str,
     department: Department,
+    mode: RetrievalMode = "fast",
     retrieval_candidates: int = 10,
     final_k: int = 4,
 ) -> list[Document]:
     vector_store = get_vector_store(department)
-    alt_queries = generate_queries(question) if settings.enable_multi_query else []
+    alt_queries = generate_queries(question) if mode == "deep" else []
     all_queries = [question, *alt_queries]
     results = [vector_store.similarity_search(query, k=retrieval_candidates) for query in all_queries]
     fused = reciprocal_rank_fusion(results)
-    return rerank(question, fused[:retrieval_candidates], top_k=final_k)
+    return rerank(question, fused[:retrieval_candidates], top_k=final_k, mode=mode)
 
 
 def clean_page_content(page_content: str) -> str:
@@ -179,8 +181,8 @@ def format_sources(docs: list[Document]) -> list[dict[str, str | None]]:
     ]
 
 
-def answer_department(question: str, department: Department) -> tuple[str, list[Document]]:
-    docs = retrieve(question, department)
+def answer_department(question: str, department: Department, mode: RetrievalMode = "fast") -> tuple[str, list[Document]]:
+    docs = retrieve(question, department, mode=mode)
     prompt = ChatPromptTemplate.from_template(RAG_TEMPLATE)
     answer = (prompt | get_llm() | StrOutputParser()).invoke(
         {

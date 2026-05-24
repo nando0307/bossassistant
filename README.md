@@ -58,11 +58,14 @@ Request body:
 ```json
 {
   "question": "How much PTO do I accrue per year?",
-  "department": "hr"
+  "department": "hr",
+  "mode": "fast"
 }
 ```
 
 `department` may be `"hr"`, `"finance"`, or `null` for automatic routing.
+
+`mode` may be `"fast"` or `"deep"`. Fast mode is the production default. Deep mode enables multi-query retrieval and uses the reranker when `ENABLE_RERANKER=true`.
 
 Response shape:
 
@@ -128,7 +131,6 @@ NEO4J_DATABASE=
 NVIDIA_API_KEY=
 NVIDIA_CHAT_MODEL=meta/llama-3.1-8b-instruct
 NVIDIA_MAX_TOKENS=384
-ENABLE_MULTI_QUERY=false
 LANGSMITH_API_KEY=
 LANGSMITH_TRACING=
 LANGSMITH_PROJECT=
@@ -186,7 +188,7 @@ Routing behavior:
 - Bundled prompts are split and answered one question at a time.
 - Vague standalone questions, such as "How much do I get?", ask for clarification instead of guessing.
 
-`ENABLE_MULTI_QUERY=false` is the default for deployed latency. Set it to `true` for notebook-faithful multi-query retrieval experiments.
+Fast mode is the default for deployed latency. Use request-level `"mode": "deep"` for notebook-faithful multi-query retrieval experiments.
 
 `NVIDIA_CHAT_MODEL` defaults to `meta/llama-3.1-8b-instruct` for production latency. The original notebook model, `qwen/qwen3-next-80b-a3b-instruct`, can be used for higher-capacity experiments.
 
@@ -229,17 +231,16 @@ Frontend:
 Production defaults to a low-latency path so the deployed app stays usable:
 
 ```env
-ENABLE_MULTI_QUERY=false
 ENABLE_RERANKER=false
 NVIDIA_CHAT_MODEL=meta/llama-3.1-8b-instruct
 ```
 
-Planned next step:
+Current mode behavior:
 
-- Add explicit request modes: `"fast"` and `"deep"`.
 - Use `"fast"` for the default deployed UI.
 - Use `"deep"` for RAGAS evaluation and portfolio writeups.
-- In `"deep"` mode, re-enable multi-query retrieval and reranking.
+- In `"deep"` mode, multi-query retrieval is enabled for that request.
+- Reranking runs in `"deep"` mode when `ENABLE_RERANKER=true`.
 - Replace the local `BAAI/bge-reranker-large` cross-encoder with a hosted reranker before making deep mode production-default.
 
 ## Evaluation
@@ -255,7 +256,7 @@ uv run python scripts/run_eval.py --api-url http://127.0.0.1:8000
 Run against the deployed Railway API:
 
 ```bash
-uv run python scripts/run_eval.py --api-url https://bossassistant-production.up.railway.app
+uv run python scripts/run_eval.py --api-url https://bossassistant-production.up.railway.app --mode fast
 ```
 
 The script records:

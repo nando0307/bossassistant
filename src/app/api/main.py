@@ -22,6 +22,8 @@ from app.agents.router import answer_question
 from app.config import settings
 from app.db import verify_connectivity
 
+RetrievalMode = Literal["fast", "deep"]
+
 app = FastAPI(
     title="BossAssistant API",
     description="Department-scoped RAG assistant (HR + Finance).",
@@ -39,6 +41,7 @@ app.add_middleware(
 class AskRequest(BaseModel):
     question: str = Field(..., min_length=1)
     department: Literal["hr", "finance"] | None = None
+    mode: RetrievalMode = "fast"
 
 
 class Source(BaseModel):
@@ -79,7 +82,7 @@ def ready(response: Response) -> dict[str, str]:
 @app.post("/ask", response_model=AskResponse)
 def ask(request: AskRequest) -> AskResponse:
     """Answer a question using the department-scoped RAG pipeline."""
-    result = answer_question(request.question, request.department)
+    result = answer_question(request.question, request.department, mode=request.mode)
     return AskResponse(
         answer=result["answer"],
         sources=[Source(**source) for source in result["sources"]],

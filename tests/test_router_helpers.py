@@ -1,12 +1,5 @@
 from __future__ import annotations
 
-import os
-
-os.environ.setdefault("NEO4J_URI", "neo4j://localhost:7687")
-os.environ.setdefault("NEO4J_USER", "neo4j")
-os.environ.setdefault("NEO4J_PASSWORD", "test-password")
-os.environ.setdefault("NVIDIA_API_KEY", "test-key")
-
 from app.agents.router import is_vague_subquestion, route_question_fast, split_user_questions
 
 
