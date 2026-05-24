@@ -1,5 +1,7 @@
 # BossAssistant
 
+[![CI](https://github.com/nando0307/bossassistant/actions/workflows/ci.yml/badge.svg)](https://github.com/nando0307/bossassistant/actions/workflows/ci.yml)
+
 Department-scoped RAG assistant for HR and Finance policy questions.
 
 BossAssistant started as a Colab prototype and is now a deployed full-stack app:
@@ -11,7 +13,16 @@ BossAssistant started as a Colab prototype and is now a deployed full-stack app:
 - Multi-query retrieval with Reciprocal Rank Fusion
 - Optional cross-encoder reranking
 - Structured routing across HR, Finance, or both departments
+- Multi-question splitting for bundled prompts
 - Optional Langfuse tracing for LLM observability
+
+## What This Demonstrates
+
+- Porting a notebook RAG prototype into a packaged, deployed FastAPI service
+- Hybrid retrieval over department-scoped Neo4j indexes
+- Routing logic for HR-only, Finance-only, and cross-department questions
+- Production latency tradeoffs with configurable retrieval depth
+- Full-stack deployment with Railway, Vercel, Docker, and GitHub Actions CI
 
 ## Live App
 
@@ -148,6 +159,8 @@ FastAPI /ask endpoint
         v
 Department router
         |
+        +--> Multi-question splitter / clarification guard
+        |
         +--> HR retriever     --> Neo4j hr_vector + hr_keyword
         |
         +--> Finance retriever --> Neo4j fin_vector + fin_keyword
@@ -162,6 +175,14 @@ Retrieval flow:
 2. Optionally generate alternate queries and merge ranked results with Reciprocal Rank Fusion.
 3. Optionally rerank with `BAAI/bge-reranker-large`.
 4. Generate a grounded answer using retrieved policy chunks.
+
+Routing behavior:
+
+- Clear HR questions route to HR.
+- Clear Finance questions route to Finance.
+- Cross-department questions route to both departments.
+- Bundled prompts are split and answered one question at a time.
+- Vague standalone questions, such as "How much do I get?", ask for clarification instead of guessing.
 
 `ENABLE_MULTI_QUERY=false` is the default for deployed latency. Set it to `true` for notebook-faithful multi-query retrieval experiments.
 
@@ -219,14 +240,40 @@ Planned next step:
 - In `"deep"` mode, re-enable multi-query retrieval and reranking.
 - Replace the local `BAAI/bge-reranker-large` cross-encoder with a hosted reranker before making deep mode production-default.
 
+## Evaluation
+
+The repo includes a lightweight evaluation harness in `scripts/run_eval.py` with cases in `evals/questions.jsonl`.
+
+Run against a local API:
+
+```bash
+uv run python scripts/run_eval.py --api-url http://127.0.0.1:8000
+```
+
+Run against the deployed Railway API:
+
+```bash
+uv run python scripts/run_eval.py --api-url https://bossassistant-production.up.railway.app
+```
+
+The script records:
+
+- request success
+- latency
+- expected vs. actual routed department
+- expected source coverage
+- model answer text for manual review
+
+Generated eval output is written to `evals/results.jsonl` and is intentionally git-ignored.
+
 ## Development Checks
 
 Backend:
 
 ```bash
-uv run python -m compileall src
-uv run ruff check src
-uv run mypy src
+uv run python -m compileall src scripts tests
+uv run ruff check src scripts tests
+uv run mypy src scripts tests
 uv run pytest
 ```
 
@@ -238,4 +285,4 @@ npm run lint
 npm run build
 ```
 
-Note: the current backend test suite is not populated yet, so `pytest` reports zero collected tests.
+GitHub Actions runs these checks on every push to `main`.
