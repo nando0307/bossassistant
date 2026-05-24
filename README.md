@@ -24,6 +24,8 @@ BossAssistant started as a Colab prototype and is now a deployed full-stack app:
 - Production latency tradeoffs with configurable retrieval depth
 - Full-stack deployment with Railway, Vercel, Docker, and GitHub Actions CI
 
+For a recruiter-facing project summary, see [docs/portfolio.md](docs/portfolio.md).
+
 ## Live App
 
 - Frontend: https://bossassistant-my7qsq9aj-nando0307s-projects.vercel.app
