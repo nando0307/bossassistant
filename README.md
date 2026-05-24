@@ -262,6 +262,8 @@ The script records:
 - latency
 - expected vs. actual routed department
 - expected source coverage
+- required answer terms via `must_include`
+- forbidden answer terms via `must_not_include`
 - model answer text for manual review
 
 Generated eval output is written to `evals/results.jsonl` and is intentionally git-ignored.
