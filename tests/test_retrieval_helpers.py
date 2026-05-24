@@ -2,7 +2,13 @@ from __future__ import annotations
 
 from langchain_core.documents import Document
 
-from app.retrieval.rag import dedupe_sources, format_sources
+from app.config import settings
+from app.retrieval.rag import dedupe_sources, format_sources, model_for_mode
+
+
+def test_model_for_mode_uses_fast_and_deep_settings() -> None:
+    assert model_for_mode("fast") == settings.nvidia_chat_model
+    assert model_for_mode("deep") == settings.nvidia_deep_chat_model
 
 
 def test_format_sources_dedupes_duplicate_document_chunks() -> None:

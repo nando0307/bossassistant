@@ -129,7 +129,8 @@ NEO4J_USER=
 NEO4J_PASSWORD=
 NEO4J_DATABASE=
 NVIDIA_API_KEY=
-NVIDIA_CHAT_MODEL=meta/llama-3.1-8b-instruct
+NVIDIA_CHAT_MODEL=qwen/qwen3-next-80b-a3b-instruct
+NVIDIA_DEEP_CHAT_MODEL=moonshotai/kimi-k2-instruct
 NVIDIA_MAX_TOKENS=384
 LANGSMITH_API_KEY=
 LANGSMITH_TRACING=
@@ -190,7 +191,7 @@ Routing behavior:
 
 Fast mode is the default for deployed latency. Use request-level `"mode": "deep"` for notebook-faithful multi-query retrieval experiments.
 
-`NVIDIA_CHAT_MODEL` defaults to `meta/llama-3.1-8b-instruct` for production latency. The original notebook model, `qwen/qwen3-next-80b-a3b-instruct`, can be used for higher-capacity experiments.
+`NVIDIA_CHAT_MODEL` controls fast/default answer generation and routing. `NVIDIA_DEEP_CHAT_MODEL` controls deep-mode multi-query generation and answer generation.
 
 When Langfuse is enabled, BossAssistant traces key LangChain runs:
 
@@ -232,7 +233,8 @@ Production defaults to a low-latency path so the deployed app stays usable:
 
 ```env
 ENABLE_RERANKER=false
-NVIDIA_CHAT_MODEL=meta/llama-3.1-8b-instruct
+NVIDIA_CHAT_MODEL=qwen/qwen3-next-80b-a3b-instruct
+NVIDIA_DEEP_CHAT_MODEL=moonshotai/kimi-k2-instruct
 ```
 
 Current mode behavior:
@@ -240,6 +242,7 @@ Current mode behavior:
 - Use `"fast"` for the default deployed UI.
 - Use `"deep"` for RAGAS evaluation and portfolio writeups.
 - In `"deep"` mode, multi-query retrieval is enabled for that request.
+- In `"deep"` mode, BossAssistant uses `NVIDIA_DEEP_CHAT_MODEL`.
 - Reranking runs in `"deep"` mode when `ENABLE_RERANKER=true`.
 - Replace the local `BAAI/bge-reranker-large` cross-encoder with a hosted reranker before making deep mode production-default.
 

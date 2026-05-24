@@ -68,14 +68,26 @@ INDEX_CONFIG: dict[Department, dict[str, str]] = {
 }
 
 
-@lru_cache(maxsize=1)
-def get_llm() -> ChatNVIDIA:
+def model_for_mode(mode: RetrievalMode) -> str:
+    if mode == "deep":
+        return settings.nvidia_deep_chat_model
+    return settings.nvidia_chat_model
+
+
+@lru_cache(maxsize=2)
+def get_llm(model_name: str | None = None) -> ChatNVIDIA:
     return ChatNVIDIA(
-        model=settings.nvidia_chat_model,
+        model=model_name or settings.nvidia_chat_model,
         nvidia_api_key=settings.nvidia_api_key.get_secret_value(),
         temperature=0,
         max_completion_tokens=settings.nvidia_max_tokens,
     )
+
+
+def get_llm_for_mode(mode: RetrievalMode) -> ChatNVIDIA:
+    if mode == "deep":
+        return get_llm(settings.nvidia_deep_chat_model)
+    return get_llm()
 
 
 @lru_cache(maxsize=1)
@@ -115,8 +127,8 @@ def parse_queries(text: str) -> list[str]:
     return [match.group(1).strip() for line in text.splitlines() if (match := pattern.match(line))]
 
 
-def generate_queries(question: str) -> list[str]:
-    chain = ChatPromptTemplate.from_template(MULTI_QUERY_TEMPLATE) | get_llm() | StrOutputParser()
+def generate_queries(question: str, mode: RetrievalMode = "deep") -> list[str]:
+    chain = ChatPromptTemplate.from_template(MULTI_QUERY_TEMPLATE) | get_llm_for_mode(mode) | StrOutputParser()
     return parse_queries(
         chain.invoke(
             {"question": question},
@@ -157,7 +169,7 @@ def retrieve(
     final_k: int = 4,
 ) -> list[Document]:
     vector_store = get_vector_store(department)
-    alt_queries = generate_queries(question) if mode == "deep" else []
+    alt_queries = generate_queries(question, mode=mode) if mode == "deep" else []
     all_queries = [question, *alt_queries]
     results = [vector_store.similarity_search(query, k=retrieval_candidates) for query in all_queries]
     fused = reciprocal_rank_fusion(results)
@@ -206,7 +218,7 @@ def format_sources(docs: list[Document]) -> list[dict[str, str | None]]:
 def answer_department(question: str, department: Department, mode: RetrievalMode = "fast") -> tuple[str, list[Document]]:
     docs = retrieve(question, department, mode=mode)
     prompt = ChatPromptTemplate.from_template(RAG_TEMPLATE)
-    answer = (prompt | get_llm() | StrOutputParser()).invoke(
+    answer = (prompt | get_llm_for_mode(mode) | StrOutputParser()).invoke(
         {
             "department": INDEX_CONFIG[department]["department_name"],
             "context": format_docs(docs),
