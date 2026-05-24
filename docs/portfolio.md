@@ -71,14 +71,14 @@ Production defaults to a fast configuration:
 ```env
 ENABLE_RERANKER=false
 NVIDIA_CHAT_MODEL=qwen/qwen3-next-80b-a3b-instruct
-NVIDIA_DEEP_CHAT_MODEL=moonshotai/kimi-k2.6
+NVIDIA_DEEP_CHAT_MODEL=qwen/qwen3-next-80b-a3b-instruct
 NVIDIA_MAX_TOKENS=384
 ```
 
 The API now exposes request modes:
 
 - `fast`: default deployed app path
-- `deep`: multi-query retrieval with Kimi-backed answer generation, plus reranking when `ENABLE_RERANKER=true`
+- `deep`: multi-query retrieval with configurable answer generation, plus reranking when `ENABLE_RERANKER=true`
 
 ## Evaluation
 

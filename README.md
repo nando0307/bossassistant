@@ -130,7 +130,7 @@ NEO4J_PASSWORD=
 NEO4J_DATABASE=
 NVIDIA_API_KEY=
 NVIDIA_CHAT_MODEL=qwen/qwen3-next-80b-a3b-instruct
-NVIDIA_DEEP_CHAT_MODEL=moonshotai/kimi-k2.6
+NVIDIA_DEEP_CHAT_MODEL=qwen/qwen3-next-80b-a3b-instruct
 NVIDIA_MAX_TOKENS=384
 LANGSMITH_API_KEY=
 LANGSMITH_TRACING=
@@ -191,7 +191,7 @@ Routing behavior:
 
 Fast mode is the default for deployed latency. Use request-level `"mode": "deep"` for notebook-faithful multi-query retrieval experiments.
 
-`NVIDIA_CHAT_MODEL` controls fast/default answer generation, routing, and multi-query generation. `NVIDIA_DEEP_CHAT_MODEL` controls deep-mode answer generation.
+`NVIDIA_CHAT_MODEL` controls fast/default answer generation, routing, and multi-query generation. `NVIDIA_DEEP_CHAT_MODEL` controls deep-mode answer generation. Kimi models can be tested here as an experiment, but Qwen is the deployed default because it stays within Railway response time limits.
 
 When Langfuse is enabled, BossAssistant traces key LangChain runs:
 
@@ -234,7 +234,7 @@ Production defaults to a low-latency path so the deployed app stays usable:
 ```env
 ENABLE_RERANKER=false
 NVIDIA_CHAT_MODEL=qwen/qwen3-next-80b-a3b-instruct
-NVIDIA_DEEP_CHAT_MODEL=moonshotai/kimi-k2.6
+NVIDIA_DEEP_CHAT_MODEL=qwen/qwen3-next-80b-a3b-instruct
 ```
 
 Current mode behavior:
