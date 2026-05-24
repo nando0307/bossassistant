@@ -107,7 +107,7 @@ department_matches=8/8
 source_hits=8/8
 quality_matches=8/8
 fully_passed=8/8
-avg_latency_seconds=1.81
+avg_latency_seconds=1.98
 ```
 
 ## Engineering Lessons
