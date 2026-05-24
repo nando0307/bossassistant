@@ -10,7 +10,7 @@ from langchain_core.prompts import ChatPromptTemplate
 from pydantic import BaseModel, Field
 
 from app.observability import langchain_config
-from app.retrieval.rag import Department, RetrievalMode, answer_department, format_sources, get_llm
+from app.retrieval.rag import Department, RetrievalMode, answer_department, dedupe_sources, format_sources, get_llm
 
 
 class RouteQuery(BaseModel):
@@ -311,7 +311,7 @@ def answer_question(
 
         return {
             "answer": "\n\n".join(answers),
-            "sources": sources,
+            "sources": dedupe_sources(sources),
             "department_routed": routed,
         }
 

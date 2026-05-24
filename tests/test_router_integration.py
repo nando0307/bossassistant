@@ -95,6 +95,15 @@ def test_multi_question_splits_and_answers_each(mock_ad: Any) -> None:
 
 
 @patch("app.agents.router.answer_department", side_effect=_fake_answer_department)
+def test_multi_question_sources_are_deduped(mock_ad: Any) -> None:
+    result = answer_question(
+        "How much PTO do I accrue? How much vacation do I accrue?"
+    )
+
+    assert [source["source"] for source in result["sources"]] == ["HR-001"]
+
+
+@patch("app.agents.router.answer_department", side_effect=_fake_answer_department)
 def test_multi_question_skips_vague_subquestions(mock_ad: Any) -> None:
     """Vague subquestions in a bundle should get clarification, not retrieval."""
     result = answer_question(

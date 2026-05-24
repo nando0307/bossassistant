@@ -172,8 +172,26 @@ def format_docs(docs: list[Document]) -> str:
     return "\n\n".join(f"[{doc.metadata.get('title', '?')}] {clean_page_content(doc.page_content)}" for doc in docs)
 
 
+def dedupe_sources(sources: list[dict[str, str | None]]) -> list[dict[str, str | None]]:
+    deduped: list[dict[str, str | None]] = []
+    seen_source_ids: set[str] = set()
+
+    for source in sources:
+        source_id = source.get("source")
+        if source_id is None:
+            deduped.append(source)
+            continue
+        if source_id in seen_source_ids:
+            continue
+
+        seen_source_ids.add(source_id)
+        deduped.append(source)
+
+    return deduped
+
+
 def format_sources(docs: list[Document]) -> list[dict[str, str | None]]:
-    return [
+    sources = [
         {
             "source": doc.metadata.get("source"),
             "title": doc.metadata.get("title"),
@@ -182,6 +200,7 @@ def format_sources(docs: list[Document]) -> list[dict[str, str | None]]:
         }
         for doc in docs
     ]
+    return dedupe_sources(sources)
 
 
 def answer_department(question: str, department: Department, mode: RetrievalMode = "fast") -> tuple[str, list[Document]]:
