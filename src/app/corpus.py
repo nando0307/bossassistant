@@ -332,4 +332,54 @@ FIN_DOCS: list[Document] = [
 
 #: Keyed to match `INDEX_CONFIG` in `app.retrieval.rag`; declared locally so the
 #: corpus module stays free of retrieval imports.
+#: Groups permitted to retrieve each document. Everything not listed here is
+#: readable by `all-employees`; entries below narrow that.
+#:
+#: The point of the exceptions is that ACL is NOT the same axis as department.
+#: A Finance analyst and the CFO are both "finance", but only one should see the
+#: M&A policy; a manager and their report are both "all-employees", but only one
+#: should see compensation bands. If ACL collapsed onto department, the existing
+#: per-department indexes would already be the whole feature.
+DEFAULT_ACL_GROUPS = ("all-employees",)
+
+ACL_OVERRIDES: dict[str, tuple[str, ...]] = {
+    # People data that names or ranks individuals.
+    "HR-011": ("managers", "hr-team"),          # Compensation bands
+    "HR-012": ("managers", "hr-team"),          # Recruiting and hiring approvals
+    "HR-036": ("managers", "hr-team"),          # Performance improvement plans
+    "HR-037": ("hr-team",),                     # Employment verification
+    # Financial internals: material non-public or control-sensitive.
+    "FIN-005": ("finance-team",),               # Revenue recognition
+    "FIN-007": ("finance-team",),               # Financial reporting and close
+    "FIN-016": ("finance-team", "executives"),  # SOX controls
+    "FIN-017": ("finance-team", "executives"),  # Internal audit
+    "FIN-018": ("finance-team", "executives"),  # Treasury and banking
+    "FIN-019": ("finance-team",),               # Tax compliance
+    "FIN-026": ("finance-team", "executives"),  # Transfer pricing
+    "FIN-034": ("finance-team", "executives"),  # Financial planning
+    "FIN-035": ("finance-team",),               # Billing and collections
+    "FIN-037": ("executives",),                 # Mergers and acquisitions
+}
+
+
+def _stamp_acl(docs: list[Document]) -> list[Document]:
+    """Attach `acl_groups` to every document before it reaches the splitter.
+
+    Stamped here rather than at ingest so the chunker copies it onto every
+    chunk automatically — an unstamped chunk is a chunk that leaks.
+    """
+    for doc in docs:
+        source = doc.metadata["source"]
+        doc.metadata["acl_groups"] = list(ACL_OVERRIDES.get(source, DEFAULT_ACL_GROUPS))
+    return docs
+
+
+_stamp_acl(HR_DOCS)
+_stamp_acl(FIN_DOCS)
+
+#: Every group named anywhere in the corpus, for token minting and validation.
+ALL_GROUPS: frozenset[str] = frozenset(
+    group for doc in (*HR_DOCS, *FIN_DOCS) for group in doc.metadata["acl_groups"]
+)
+
 DOCUMENTS: dict[Literal["hr", "finance"], list[Document]] = {"hr": HR_DOCS, "finance": FIN_DOCS}

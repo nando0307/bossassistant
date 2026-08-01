@@ -1,0 +1,81 @@
+{
+  "k": 4,
+  "cases": 25,
+  "personas": {
+    "employee": {
+      "groups": [
+        "all-employees"
+      ],
+      "recall_by_factor": {
+        "1": 0.88,
+        "2": 0.97,
+        "4": 0.97,
+        "6": 0.97,
+        "8": 0.97,
+        "12": 0.97
+      },
+      "empty_at_min_factor": 0
+    },
+    "finance-analyst": {
+      "groups": [
+        "all-employees",
+        "finance-team"
+      ],
+      "recall_by_factor": {
+        "1": 0.88,
+        "2": 0.97,
+        "4": 0.97,
+        "6": 0.97,
+        "8": 0.97,
+        "12": 0.97
+      },
+      "empty_at_min_factor": 0
+    },
+    "hr-partner": {
+      "groups": [
+        "all-employees",
+        "hr-team",
+        "managers"
+      ],
+      "recall_by_factor": {
+        "1": 0.97,
+        "2": 0.97,
+        "4": 0.97,
+        "6": 0.97,
+        "8": 0.97,
+        "12": 0.97
+      },
+      "empty_at_min_factor": 0
+    },
+    "executive": {
+      "groups": [
+        "all-employees",
+        "executives",
+        "finance-team"
+      ],
+      "recall_by_factor": {
+        "1": 0.88,
+        "2": 0.97,
+        "4": 0.97,
+        "6": 0.97,
+        "8": 0.97,
+        "12": 0.97
+      },
+      "empty_at_min_factor": 0
+    },
+    "executive-only": {
+      "groups": [
+        "executives"
+      ],
+      "recall_by_factor": {
+        "1": 0.0,
+        "2": 0.0,
+        "4": 0.625,
+        "6": 1.0,
+        "8": 1.0,
+        "12": 1.0
+      },
+      "empty_at_min_factor": 2
+    }
+  }
+}

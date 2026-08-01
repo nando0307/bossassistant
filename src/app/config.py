@@ -56,6 +56,17 @@ class Settings(BaseSettings):
     langfuse_secret_key: SecretStr | None = None
     langfuse_host: str = "https://cloud.langfuse.com"
 
+    # --- Auth (JWT-scoped retrieval) ---
+    #: Required to verify tokens. Retrieval is ACL-filtered, so an unset secret
+    #: in production means every caller would be unauthenticated — `require_auth`
+    #: defaults to True and startup refuses that combination rather than
+    #: silently serving restricted policy documents to anonymous callers.
+    jwt_secret: SecretStr | None = None
+    jwt_algorithm: str = "HS256"
+    jwt_issuer: str = "bossassistant"
+    jwt_audience: str = "bossassistant-api"
+    require_auth: bool = True
+
     # --- CORS ---
     cors_origins: str = Field(default="http://localhost:3000,http://localhost:5173")
 

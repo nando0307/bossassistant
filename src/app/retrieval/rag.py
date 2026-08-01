@@ -164,18 +164,53 @@ def rerank(query: str, docs: list[Document], top_k: int = 4, mode: RetrievalMode
     return [doc for doc, _ in scored[:top_k]]
 
 
+#: How many extra candidates to pull before ACL filtering.
+#:
+#: Neo4j's vector index cannot pre-filter: `db.index.vector.queryNodes` picks
+#: the ANN neighbours first and any property predicate is applied afterwards.
+#: So an ACL filter is necessarily post-ANN, and the failure mode is silent —
+#: a caller whose groups own a thin slice of the corpus gets fewer than `k`
+#: chunks back, or none, while the query itself looks successful.
+#:
+#: Over-fetching trades latency for recall. The alternative is partitioning the
+#: index per group, which prices in a combinatorial index count once groups
+#: overlap (a user in 3 of 5 groups needs the union, not one partition).
+#: `scripts/measure_acl_recall.py` measures what this factor actually costs.
+ACL_OVERFETCH = 6
+
+
+def filter_by_acl(docs: list[Document], groups: frozenset[str] | None) -> list[Document]:
+    """Drop chunks the caller may not read.
+
+    `groups=None` means ACL enforcement is disabled for this call (offline
+    ingestion checks and the measurement harness). Request paths always pass a
+    real set — an empty frozenset legitimately matches nothing.
+    """
+    if groups is None:
+        return docs
+    return [
+        doc
+        for doc in docs
+        if groups.intersection(doc.metadata.get("acl_groups") or [])
+    ]
+
+
 def retrieve(
     question: str,
     department: Department,
     mode: RetrievalMode = "fast",
     retrieval_candidates: int = 10,
     final_k: int = 4,
+    groups: frozenset[str] | None = None,
+    overfetch: int = ACL_OVERFETCH,
 ) -> list[Document]:
     vector_store = get_vector_store(department)
     alt_queries = generate_queries(question) if mode == "deep" else []
     all_queries = [question, *alt_queries]
-    results = [vector_store.similarity_search(query, k=retrieval_candidates) for query in all_queries]
-    fused = reciprocal_rank_fusion(results)
+    # Over-fetch only when a filter will actually be applied.
+    fetch_k = retrieval_candidates * overfetch if groups is not None else retrieval_candidates
+    results = [vector_store.similarity_search(query, k=fetch_k) for query in all_queries]
+    fused = filter_by_acl(reciprocal_rank_fusion(results), groups)
     return rerank(question, fused[:retrieval_candidates], top_k=final_k, mode=mode)
 
 
@@ -228,8 +263,13 @@ def format_contexts(docs: list[Document]) -> list[str]:
     return [clean_page_content(doc.page_content) for doc in docs]
 
 
-def answer_department(question: str, department: Department, mode: RetrievalMode = "fast") -> tuple[str, list[Document]]:
-    docs = retrieve(question, department, mode=mode)
+def answer_department(
+    question: str,
+    department: Department,
+    mode: RetrievalMode = "fast",
+    groups: frozenset[str] | None = None,
+) -> tuple[str, list[Document]]:
+    docs = retrieve(question, department, mode=mode, groups=groups)
     prompt = ChatPromptTemplate.from_template(RAG_TEMPLATE)
     answer = (prompt | get_llm_for_mode(mode) | StrOutputParser()).invoke(
         {

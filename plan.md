@@ -275,6 +275,64 @@ Full 75-case factoid suite in fast mode, for reference: faithfulness 0.762 (n=70
 relevancy 0.677 (n=73/73), 65/75 passed, p50 2.96s. Not comparable to the table above,
 which uses a different and much harder question set.
 
+## ACL-aware retrieval
+
+Retrieval is filtered by the caller's JWT groups. The groups are pushed **down into
+`retrieve()`**, not checked against the finished answer — by the time an answer exists,
+restricted text has already entered the prompt and can leak through paraphrase, refusal
+wording, or a citation list.
+
+**The ACL axis is deliberately not the department axis.** 14 of 75 documents are
+restricted: compensation bands and PIPs to `managers`/`hr-team`, SOX/treasury/transfer
+pricing to `finance-team`/`executives`, M&A to `executives` alone. If ACL collapsed onto
+department, the existing per-department indexes would already be the whole feature.
+
+Verified end to end on "What approvals are required for an acquisition?":
+
+| Caller | Sources returned | Answer |
+|---|---|---|
+| no token | — | 401 `missing bearer token` |
+| `all-employees` | FIN-008, FIN-014, FIN-013, FIN-033 | "I don't have that information" |
+| `executives` | **FIN-037**, FIN-008, FIN-014 | cites the M&A policy |
+
+Graph mode is filtered too, and needed an extra guard: an `Entity.description` is
+LLM-written *from* the source text, so an entity extracted only from a restricted policy
+discloses that policy in paraphrase even if the chunk itself is withheld. Entities are
+therefore only visible when the caller can read a chunk that mentions them.
+
+### The trade-off, measured
+
+Neo4j's vector index **cannot pre-filter**: `db.index.vector.queryNodes` picks ANN
+neighbours first and any property predicate applies afterwards. So the filter is
+necessarily post-ANN, and the failure is silent — a narrowly-scoped caller gets fewer
+than `k` chunks, or none, while the query looks successful.
+
+Two options: over-fetch `k*f` then filter (one index, recall degrades with ACL
+selectivity), or partition per group (exact, but combinatorial once groups overlap — a
+user in 3 of 5 groups needs a union of 3 indexes, and a document in N groups is embedded
+N times). This project takes over-fetch. `scripts/measure_acl_recall.py` prices it
+against exact brute-force cosine over every readable chunk:
+
+| Persona | readable | f=1 | f=2 | f=4 | f=6 | f=12 |
+|---|---|---|---|---|---|---|
+| employee | 89% / 72% | 0.880 | 0.970 | 0.970 | 0.970 | 0.970 |
+| finance-analyst | 89% / 97% | 0.880 | 0.970 | 0.970 | 0.970 | 0.970 |
+| hr-partner | 100% / 72% | 0.970 | 0.970 | 0.970 | 0.970 | 0.970 |
+| executive | 89% / 100% | 0.880 | 0.970 | 0.970 | 0.970 | 0.970 |
+| **executive-only** | **0% / 17%** | **0.000** | **0.000** | 0.625 | **1.000** | 1.000 |
+
+Two things this shows that an opinion would not:
+
+1. **Selectivity, not group count, drives the cost.** Broad personas are saturated by
+   f=2. The principal who can read 17% of Finance and 0% of HR scores **0.000 recall at
+   f=2 and returns empty on 2 of 25 questions with no error at all.** That is the silent
+   degradation, reproduced.
+2. **`ACL_OVERFETCH = 6` is chosen, not guessed** — the first factor where the most
+   selective principal reaches 1.000.
+
+The 0.970 ceiling is not an ACL cost: it persists at f=12 and is the hybrid ANN index's
+own approximation error against exact cosine.
+
 ## Next steps
 
 1. ~~Faithfulness is judge-bound~~ — **solved. See RAGAS below.** (Original diagnosis kept for the record:) The judge model was
@@ -329,7 +387,7 @@ Now partly measured. Status of each original claim:
 |---|---|
 | RAGAS faithfulness 64→91%, relevance 68→89%, n=100 | Replaced with measured numbers: faithfulness **0.648 → 0.854**, relevancy **0.623 → 0.903**, n=15, by swapping vector retrieval for the entity graph. Not 91%, and n=15 not 100 — but real and reproducible from `evals/`. |
 | BM25 + dense + cross-encoder via RRF | Misdescribed. Hybrid fusion is Neo4j's Lucene fulltext index; RRF fuses multi-query variants. Reranker defaults off and is skipped in fast mode. |
-| JWT role-scoped retrieval (HR/Finance/Admin) | Does not exist. Build it or drop it. |
+| JWT role-scoped retrieval (HR/Finance/Admin) | **Now real**, and more interesting than the original claim: 5 groups that cut across department, filtered at retrieval rather than post-hoc, with the post-ANN recall cost measured (`evals/acl_recall.json`). |
 | FastAPI streaming | No streaming endpoint. |
 | CI gate on >5% faithfulness regression | CI runs ruff/mypy/pytest only. See next steps 5. |
 | p95 < 2.5s over 500+ queries | **p50 is 2.33s, p95 is 8.17s at n=75.** The p50 claim survives; the p95 claim does not. |

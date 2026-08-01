@@ -14,11 +14,12 @@ from __future__ import annotations
 
 from typing import Literal
 
-from fastapi import FastAPI, HTTPException, Response, status
+from fastapi import Depends, FastAPI, HTTPException, Response, status
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
 from app.agents.router import answer_question
+from app.auth import Principal, get_principal
 from app.config import settings
 from app.db import verify_connectivity
 from app.retrieval.rag import RetrievalMode  # single definition; a local copy silently drifted
@@ -90,11 +91,35 @@ def ready(response: Response) -> dict[str, str]:
 _UPSTREAM_RETRYABLE = ("[502]", "[503]", "[504]", "ResourceExhausted", "Too Many Requests")
 
 
+@app.on_event("startup")
+def _verify_auth_configuration() -> None:
+    """Refuse to serve restricted policy with auth on and no way to verify it."""
+    if settings.require_auth and settings.jwt_secret is None:
+        raise RuntimeError(
+            "REQUIRE_AUTH is true but JWT_SECRET is unset: every caller would be "
+            "rejected. Set JWT_SECRET, or set REQUIRE_AUTH=false to run "
+            "unauthenticated with all-employees access only."
+        )
+
+
 @app.post("/ask", response_model=AskResponse)
-def ask(request: AskRequest) -> AskResponse:
-    """Answer a question using the department-scoped RAG pipeline."""
+def ask(
+    request: AskRequest,
+    principal: Principal = Depends(get_principal),
+) -> AskResponse:
+    """Answer a question using the department-scoped, ACL-filtered RAG pipeline.
+
+    The caller's groups are pushed down into retrieval rather than checked
+    against the finished answer: by the time an answer exists, restricted text
+    has already entered the prompt.
+    """
     try:
-        result = answer_question(request.question, request.department, mode=request.mode)
+        result = answer_question(
+            request.question,
+            request.department,
+            mode=request.mode,
+            groups=principal.groups,
+        )
     except Exception as exc:  # noqa: BLE001 - provider raises bare Exception
         message = str(exc)
         if any(marker in message for marker in _UPSTREAM_RETRYABLE):

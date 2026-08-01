@@ -31,7 +31,12 @@ def _fake_fin(*_args: Any, **_kwargs: Any) -> tuple[str, list[Document]]:
     return "NYC hotels must not exceed $350 per night.", [FAKE_FIN_DOC]
 
 
-def _fake_answer_department(question: str, department: str, mode: str = "fast") -> tuple[str, list[Document]]:
+def _fake_answer_department(
+    question: str,
+    department: str,
+    mode: str = "fast",
+    groups: frozenset[str] | None = None,
+) -> tuple[str, list[Document]]:
     if department == "hr":
         return _fake_hr()
     return _fake_fin()

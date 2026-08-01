@@ -130,7 +130,12 @@ def rank_communities(
     return [rows[i] for i in order]
 
 
-def community_sources(graph: Neo4jGraph, community_ids: list[str], min_entities: int = 3) -> list[str]:
+def community_sources(
+    graph: Neo4jGraph,
+    community_ids: list[str],
+    min_entities: int = 3,
+    groups: frozenset[str] | None = None,
+) -> list[str]:
     """Documents substantially covered by the contributing communities.
 
     Requires a document to mention several of a community's entities, not just
@@ -143,11 +148,17 @@ def community_sources(graph: Neo4jGraph, community_ids: list[str], min_entities:
         """
         UNWIND $ids AS cid
         MATCH (:Community {id: cid})<-[:IN_COMMUNITY]-(e:Entity)<-[:MENTIONS]-(chunk)
+        WHERE $groups IS NULL
+           OR any(g IN coalesce(chunk.acl_groups, []) WHERE g IN $groups)
         WITH chunk.source AS source, count(DISTINCT e) AS hits
         WHERE source IS NOT NULL AND hits >= $min_entities
         RETURN source ORDER BY hits DESC
         """,
-        {"ids": community_ids, "min_entities": min_entities},
+        {
+            "ids": community_ids,
+            "min_entities": min_entities,
+            "groups": None if groups is None else sorted(groups),
+        },
     )
     return [row["source"] for row in rows]
 
@@ -232,7 +243,12 @@ def global_search(
     }
 
 
-def local_search(question: str, top_entities: int = 32, min_entity_hits: int = 3) -> GraphAnswer:
+def local_search(
+    question: str,
+    top_entities: int = 32,
+    min_entity_hits: int = 3,
+    groups: frozenset[str] | None = None,
+) -> GraphAnswer:
     """Answer from the neighbourhood of the entities the question names.
 
     The entity budget is wide on purpose. An inventory question ("what requires

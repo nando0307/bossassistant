@@ -263,9 +263,10 @@ def _answer_single_question(
     question: str,
     department: Department | None = None,
     mode: RetrievalMode = "fast",
+    groups: frozenset[str] | None = None,
 ) -> AskResult:
     if department is not None:
-        answer, docs = answer_department(question, department, mode=mode)
+        answer, docs = answer_department(question, department, mode=mode, groups=groups)
         return {
             "answer": answer,
             "sources": format_sources(docs),
@@ -275,7 +276,7 @@ def _answer_single_question(
 
     route = route_question(question)
     if route in ("hr", "finance"):
-        answer, docs = answer_department(question, route, mode=mode)
+        answer, docs = answer_department(question, route, mode=mode, groups=groups)
         return {
             "answer": answer,
             "sources": format_sources(docs),
@@ -285,12 +286,13 @@ def _answer_single_question(
 
     split_questions = split_department_questions(question)
     with ThreadPoolExecutor(max_workers=2) as executor:
-        hr_future = executor.submit(answer_department, split_questions.hr_question, "hr", mode)
+        hr_future = executor.submit(answer_department, split_questions.hr_question, "hr", mode, groups)
         finance_future = executor.submit(
             answer_department,
             split_questions.finance_question,
             "finance",
             mode,
+            groups,
         )
         hr_answer, hr_docs = hr_future.result()
         finance_answer, finance_docs = finance_future.result()
@@ -319,6 +321,7 @@ def answer_question(
     question: str,
     department: Department | None = None,
     mode: RetrievalMode = "fast",
+    groups: frozenset[str] | None = None,
 ) -> AskResult:
     if mode == "graph":
         # Entity-graph retrieval assembles answers that span more documents than
@@ -326,7 +329,7 @@ def answer_question(
         # per-department split entirely.
         from app.retrieval.graphrag import local_search
 
-        graph_result = local_search(question)
+        graph_result = local_search(question, groups=groups)
         return {
             "answer": graph_result["answer"],
             "sources": [{"source": source, "title": None, "preview": None} for source in graph_result["sources"]],
@@ -360,7 +363,7 @@ def answer_question(
                 if is_vague_subquestion(subquestion):
                     futures.append(None)
                 else:
-                    futures.append(executor.submit(_answer_single_question, subquestion, None, mode))
+                    futures.append(executor.submit(_answer_single_question, subquestion, None, mode, groups))
             for index, (subquestion, future) in enumerate(zip(subquestions, futures, strict=True), start=1):
                 if future is None:
                     answers.append(
@@ -388,4 +391,4 @@ def answer_question(
             "contexts": contexts,
         }
 
-    return _answer_single_question(question, department, mode=mode)
+    return _answer_single_question(question, department, mode=mode, groups=groups)
