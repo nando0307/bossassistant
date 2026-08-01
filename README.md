@@ -268,15 +268,29 @@ Run a small deep-mode smoke eval with a bounded request timeout:
 uv run python scripts/run_eval.py --api-url https://bossassistant-production.up.railway.app --mode deep --limit 2 --timeout 45
 ```
 
+Score answer quality with RAGAS (faithfulness + answer relevance):
+
+```bash
+uv run python scripts/run_eval.py --api-url http://127.0.0.1:8000 --mode deep --ragas
+```
+
+`--ragas` makes the harness request `include_contexts` so each answer is graded
+against the untruncated chunks the model actually retrieved. Scoring is billed
+LLM work — it runs a judge model per case, so keep it off routine smoke runs.
+Override the judge with `--ragas-model` / `--ragas-embed-model`; both defaults
+must be models your NVIDIA account can reach, or the run fails loudly rather
+than reporting empty scores.
+
 The script records:
 
 - request success
-- latency
+- latency, including p50 and p95
 - expected vs. actual routed department
 - expected source coverage
 - required answer terms via `must_include`
 - forbidden answer terms via `must_not_include`
 - model answer text for manual review
+- per-case RAGAS scores under `ragas` when `--ragas` is set
 
 Generated eval output is written to `evals/results.jsonl` and is intentionally git-ignored.
 

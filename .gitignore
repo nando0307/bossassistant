@@ -240,3 +240,7 @@ frontend/build/
 # Logs
 *.log
 logs/
+
+# GraphRAG extraction cache: 268K of LLM output, rebuildable via scripts/graph_index.py
+# Kept out of git so the repo does not carry a build artifact.
+evals/.graph_extract_cache.jsonl
