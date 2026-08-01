@@ -10,7 +10,15 @@ from langchain_core.prompts import ChatPromptTemplate
 from pydantic import BaseModel, Field
 
 from app.observability import langchain_config
-from app.retrieval.rag import Department, RetrievalMode, answer_department, dedupe_sources, format_sources, get_llm
+from app.retrieval.rag import (
+    Department,
+    RetrievalMode,
+    answer_department,
+    dedupe_sources,
+    format_contexts,
+    format_sources,
+    get_llm,
+)
 
 
 class RouteQuery(BaseModel):
@@ -44,6 +52,7 @@ class AskResult(TypedDict):
     answer: str
     sources: list[dict[str, str | None]]
     department_routed: Literal["hr", "finance", "both"]
+    contexts: list[str]
 
 
 ROUTER_SYSTEM = """You are a router that decides which department's assistant should answer a user's question.
@@ -80,7 +89,9 @@ HR_TERMS = {
 }
 
 FINANCE_TERMS = {
-    "ap",
+    # Spelled out, not "ap": a left-anchored match still fires on "approval",
+    # "apply", and "application", which are not finance questions.
+    "accounts payable",
     "budget",
     "card",
     "expense",
@@ -104,15 +115,40 @@ VAGUE_PATTERNS = (
 
 
 def _contains_any(text: str, terms: set[str]) -> bool:
+    """Match terms at a word start, so mid-word coincidences don't route.
+
+    Plain substring matching sent any question containing "three" or
+    "through" to HR (both contain "hr"). Anchoring to a word boundary on the
+    left only — not both sides — keeps plurals and inflections matching
+    ("expenses", "reimbursements", "invoicing").
+    """
     lowered = text.lower()
-    return any(term in lowered for term in terms)
+    return any(re.search(rf"\b{re.escape(term)}", lowered) for term in terms)
+
+
+#: Demonstratives only. "that" is excluded because it is far more often a
+#: relative pronoun ("spending that exceeds the budget") than a dangling
+#: reference, and "there" because "Is there a gym benefit?" is a real question.
+_DANGLING_REFERENT_RE = re.compile(r"\b(this|it|these|those)\b")
 
 
 def is_vague_subquestion(question: str) -> bool:
+    """Vague means the question has no answerable referent — not merely that
+    it misses the keyword list.
+
+    Keyword-absence used to stand in for vagueness, which refused a quarter of
+    the eval set outright: "When does the fiscal year end?" and "What medical
+    plan tiers does the company offer?" are answerable from the corpus but
+    contain none of the 26 routing terms, so they got "Please clarify" instead
+    of an answer. Retrieval and the LLM router already handle unfamiliar
+    wording; only a dangling referent genuinely can't be resolved.
+    """
     normalized = question.lower().strip(" ?.!")
     if normalized in VAGUE_PATTERNS:
         return True
-    return not _contains_any(question, HR_TERMS) and not _contains_any(question, FINANCE_TERMS)
+    if _contains_any(question, HR_TERMS) or _contains_any(question, FINANCE_TERMS):
+        return False
+    return _DANGLING_REFERENT_RE.search(question.lower()) is not None
 
 
 def split_user_questions(question: str) -> list[str]:
@@ -234,6 +270,7 @@ def _answer_single_question(
             "answer": answer,
             "sources": format_sources(docs),
             "department_routed": department,
+            "contexts": format_contexts(docs),
         }
 
     route = route_question(question)
@@ -243,6 +280,7 @@ def _answer_single_question(
             "answer": answer,
             "sources": format_sources(docs),
             "department_routed": route,
+            "contexts": format_contexts(docs),
         }
 
     split_questions = split_department_questions(question)
@@ -262,6 +300,7 @@ def _answer_single_question(
         "answer": answer,
         "sources": format_sources([*hr_docs, *finance_docs]),
         "department_routed": "both",
+        "contexts": format_contexts([*hr_docs, *finance_docs]),
     }
 
 
@@ -270,17 +309,33 @@ def answer_question(
     department: Department | None = None,
     mode: RetrievalMode = "fast",
 ) -> AskResult:
+    if mode == "graph":
+        # Entity-graph retrieval assembles answers that span more documents than
+        # a top-k window holds, so it skips the vague-question guard and the
+        # per-department split entirely.
+        from app.retrieval.graphrag import local_search
+
+        graph_result = local_search(question)
+        return {
+            "answer": graph_result["answer"],
+            "sources": [{"source": source, "title": None, "preview": None} for source in graph_result["sources"]],
+            "department_routed": "both",
+            "contexts": [],
+        }
+
     if department is None and is_vague_subquestion(question):
         return {
             "answer": "Please clarify what this question refers to, or ask it with the policy topic included.",
             "sources": [],
             "department_routed": "both",
+            "contexts": [],
         }
 
     subquestions = split_user_questions(question) if department is None else []
     if len(subquestions) > 1:
         answers: list[str] = []
         sources: list[dict[str, str | None]] = []
+        contexts: list[str] = []
         routed_departments: set[Literal["hr", "finance", "both"]] = set()
 
         with ThreadPoolExecutor(max_workers=min(len(subquestions), 4)) as executor:
@@ -300,6 +355,7 @@ def answer_question(
                 result = future.result()
                 answers.append(f"{index}. {subquestion}\n{result['answer']}")
                 sources.extend(result["sources"])
+                contexts.extend(result["contexts"])
                 routed_departments.add(result["department_routed"])
 
         if routed_departments == {"hr"}:
@@ -313,6 +369,7 @@ def answer_question(
             "answer": "\n\n".join(answers),
             "sources": dedupe_sources(sources),
             "department_routed": routed,
+            "contexts": contexts,
         }
 
     return _answer_single_question(question, department, mode=mode)

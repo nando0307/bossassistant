@@ -68,15 +68,23 @@ def test_fast_router_returns_none_for_ambiguous() -> None:
     assert route_question_fast("Where is the office located?") is None
 
 
-def test_fast_router_substring_matching() -> None:
-    """'ap' (FINANCE_TERM) matches inside 'happens' via substring search.
+def test_fast_router_ignores_mid_word_matches() -> None:
+    """Terms only match at a word start.
 
-    This documents existing behavior — substring matching is a known
-    tradeoff for speed. If this becomes a problem, switch to word-boundary
-    matching in _contains_any.
+    Substring matching routed on coincidences: "happens" contains the old
+    "ap" finance term, and "three"/"through" contain "hr". Both fall through
+    to the LLM router now.
     """
-    # 'happens' contains 'ap', which is a finance term
-    assert route_question_fast("What happens if I submit it late?") == "finance"
+    assert route_question_fast("What happens if I submit it late?") is None
+    assert route_question_fast("What changes after three years?") is None
+    assert route_question_fast("Can I work through lunch?") is None
+
+
+def test_fast_router_still_matches_inflections() -> None:
+    """Left-anchoring only — plurals and inflections must still route."""
+    assert route_question_fast("How do I submit expenses?") == "finance"
+    assert route_question_fast("Who approves vendor invoices?") == "finance"
+    assert route_question_fast("What are the medical benefits?") == "hr"
 
 
 def test_fast_router_is_case_insensitive() -> None:
@@ -122,14 +130,30 @@ def test_not_vague_when_finance_term_present() -> None:
     assert not is_vague_subquestion("How much reimbursement do I get?")
 
 
-def test_no_department_terms_is_vague() -> None:
-    """A question with no HR or Finance terms is treated as vague."""
-    assert is_vague_subquestion("Where is the office located?")
+def test_no_department_terms_is_not_vague_on_its_own() -> None:
+    """Missing the keyword list is not the same as being unanswerable.
+
+    These name a concrete topic and are answerable from the corpus, so they
+    must reach retrieval instead of getting "Please clarify".
+    """
+    assert not is_vague_subquestion("When does the fiscal year end?")
+    assert not is_vague_subquestion("What medical plan tiers does the company offer?")
+    assert not is_vague_subquestion("Who are our external auditors?")
 
 
-def test_approves_not_vague_due_to_substring() -> None:
-    """'approves' contains 'ap' (FINANCE_TERM), so it's not vague."""
-    assert not is_vague_subquestion("Who approves this request?")
+def test_dangling_referent_is_vague() -> None:
+    """A referent with no topic to resolve against stays vague."""
+    assert is_vague_subquestion("Who approves this request?")
+    assert is_vague_subquestion("Where is it?")
+
+
+def test_approves_alone_is_vague() -> None:
+    """"Who approves this request?" names no department and no topic.
+
+    It used to escape the vague check only because "approves" contains the
+    old "ap" finance term — an accident, not a decision.
+    """
+    assert is_vague_subquestion("Who approves this request?")
 
 
 # ── split_department_questions_fast ───────────────────────────────────

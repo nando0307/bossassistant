@@ -17,7 +17,9 @@ from app.config import settings
 from app.observability import langchain_config
 
 Department = Literal["hr", "finance"]
-RetrievalMode = Literal["fast", "deep"]
+#: "graph" routes to the entity-graph retriever in `app.retrieval.graphrag`
+#: rather than to vector search; it is not a chunk-retrieval tuning knob.
+RetrievalMode = Literal["fast", "deep", "graph"]
 
 MULTI_QUERY_TEMPLATE = """You are an AI language model assistant. Your task is to generate four
 different versions of the given user question to retrieve relevant documents from a vector
@@ -69,6 +71,7 @@ INDEX_CONFIG: dict[Department, dict[str, str]] = {
 
 
 def model_for_mode(mode: RetrievalMode) -> str:
+    """Graph mode never reaches here; it picks its own models in graphrag.py."""
     if mode == "deep":
         return settings.nvidia_deep_chat_model
     return settings.nvidia_chat_model
@@ -213,6 +216,16 @@ def format_sources(docs: list[Document]) -> list[dict[str, str | None]]:
         for doc in docs
     ]
     return dedupe_sources(sources)
+
+
+def format_contexts(docs: list[Document]) -> list[str]:
+    """Full chunk text, for eval scoring.
+
+    Unlike `format_sources`, this is neither truncated nor deduped: RAGAS
+    faithfulness checks each claim against the context the model actually
+    saw, so a 240-char preview would score grounded answers as unfaithful.
+    """
+    return [clean_page_content(doc.page_content) for doc in docs]
 
 
 def answer_department(question: str, department: Department, mode: RetrievalMode = "fast") -> tuple[str, list[Document]]:

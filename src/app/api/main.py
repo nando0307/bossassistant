@@ -14,15 +14,14 @@ from __future__ import annotations
 
 from typing import Literal
 
-from fastapi import FastAPI, Response, status
+from fastapi import FastAPI, HTTPException, Response, status
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
 from app.agents.router import answer_question
 from app.config import settings
 from app.db import verify_connectivity
-
-RetrievalMode = Literal["fast", "deep"]
+from app.retrieval.rag import RetrievalMode  # single definition; a local copy silently drifted
 
 app = FastAPI(
     title="BossAssistant API",
@@ -42,6 +41,9 @@ class AskRequest(BaseModel):
     question: str = Field(..., min_length=1)
     department: Literal["hr", "finance"] | None = None
     mode: RetrievalMode = "fast"
+    include_contexts: bool = False
+    """Return the full retrieved chunks. Off by default — the eval harness
+    needs them for RAGAS faithfulness; the UI only needs `sources`."""
 
 
 class Source(BaseModel):
@@ -55,6 +57,7 @@ class AskResponse(BaseModel):
     answer: str
     sources: list[Source]
     department_routed: Literal["hr", "finance", "both"]
+    contexts: list[str] | None = None
 
 
 @app.get("/health")
@@ -79,12 +82,30 @@ def ready(response: Response) -> dict[str, str]:
     return {"status": "not_ready", "neo4j": "down"}
 
 
+#: Upstream inference failures that a caller should retry rather than treat as a
+#: bug in this service. NVIDIA returns "ResourceExhausted: Worker local total
+#: request limit reached (107/32)" and bare 502s under sustained load; surfacing
+#: those as 500 told every client the request was malformed and defeated retry
+#: logic, costing whole eval runs.
+_UPSTREAM_RETRYABLE = ("[502]", "[503]", "[504]", "ResourceExhausted", "Too Many Requests")
+
+
 @app.post("/ask", response_model=AskResponse)
 def ask(request: AskRequest) -> AskResponse:
     """Answer a question using the department-scoped RAG pipeline."""
-    result = answer_question(request.question, request.department, mode=request.mode)
+    try:
+        result = answer_question(request.question, request.department, mode=request.mode)
+    except Exception as exc:  # noqa: BLE001 - provider raises bare Exception
+        message = str(exc)
+        if any(marker in message for marker in _UPSTREAM_RETRYABLE):
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="upstream inference provider unavailable; retry",
+            ) from exc
+        raise
     return AskResponse(
         answer=result["answer"],
         sources=[Source(**source) for source in result["sources"]],
         department_routed=result["department_routed"],
+        contexts=result["contexts"] if request.include_contexts else None,
     )
