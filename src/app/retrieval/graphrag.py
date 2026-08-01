@@ -60,6 +60,7 @@ class GraphAnswer(TypedDict):
     answer: str
     sources: list[str]
     communities: list[str]
+    contexts: list[str]
     mode: str
 
 
@@ -165,6 +166,7 @@ def global_search(
             "answer": "I don't have that information in my policies.",
             "sources": [],
             "communities": [],
+            "contexts": [],
             "mode": "global",
         }
 
@@ -204,6 +206,7 @@ def global_search(
             "answer": "I don't have that information in my policies.",
             "sources": [],
             "communities": [c["id"] for c in communities],
+            "contexts": [],
             "mode": "global",
         }
 
@@ -222,6 +225,9 @@ def global_search(
         "answer": str(answer.content),
         "sources": community_sources(graph, contributing),
         "communities": contributing,
+        # The findings the reduce step actually saw. Faithfulness must be judged
+        # against what the model was given, not against the whole graph.
+        "contexts": [point.point for point in points[:40]],
         "mode": "global",
     }
 
@@ -258,6 +264,7 @@ def local_search(question: str, top_entities: int = 32) -> GraphAnswer:
             "answer": "I don't have that information in my policies.",
             "sources": [],
             "communities": [],
+            "contexts": [],
             "mode": "local",
         }
 
@@ -285,6 +292,7 @@ def local_search(question: str, top_entities: int = 32) -> GraphAnswer:
         "answer": str(answer.content),
         "sources": sorted(sources),
         "communities": [],
+        "contexts": context_parts,
         "mode": "local",
     }
 

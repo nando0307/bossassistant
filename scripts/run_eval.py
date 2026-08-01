@@ -323,11 +323,15 @@ def main() -> None:
     parser.add_argument("--timeout", type=float, default=30.0)
     parser.add_argument("--limit", type=int, default=None)
     parser.add_argument("--ragas", action="store_true", help="Score faithfulness and answer relevance.")
-    # Non-reasoning judge on purpose: the chat model's thinking traces break
-    # ragas' structured-output parsing and scored 1 of 7 cases.
-    parser.add_argument("--ragas-model", default="mistralai/mistral-nemotron")
+    # Judge choice is the whole ballgame for ragas throughput, not a detail.
+    # nemotron-3-super-120b scored 1 of 7 cases (reasoning trace breaks the
+    # structured-output parser); mistral-nemotron parsed but averaged ~186s per
+    # job and timed out at scale. llama-3.1-8b does structured output reliably
+    # and scores a case in ~10s, which is what turned faithfulness from
+    # unmeasurable into a routine part of the run.
+    parser.add_argument("--ragas-model", default="meta/llama-3.1-8b-instruct")
     parser.add_argument("--ragas-embed-model", default="nvidia/nv-embedqa-e5-v5")
-    parser.add_argument("--ragas-workers", type=int, default=1)
+    parser.add_argument("--ragas-workers", type=int, default=2)
     parser.add_argument("--ragas-timeout", type=int, default=600)
     args = parser.parse_args()
 

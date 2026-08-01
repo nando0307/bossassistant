@@ -50,8 +50,7 @@ different corpora.
 | p50 latency | 2.33–2.47s | 2.81s |
 | p95 latency | 8.17–15.01s | 15.74s |
 
-Faithfulness remains unmeasured (judge too slow — see Next steps 1). Answer relevancy
-is usable and discriminates: 0.809 good / 0.266 off-topic.
+**Faithfulness 0.762 (n=70/73), answer relevancy 0.677 (n=73/73)** — see RAGAS below.
 
 The 9-case drop at 75 documents is genuine retrieval competition, not a regression:
 `fin_external_auditor` loses FIN-007 (KPMG) to three new audit-adjacent documents, and
@@ -227,9 +226,48 @@ The same reasoning-trace defect has now broken ragas scoring, graph extraction, 
 the global-search map step. It is the single most expensive recurring problem in
 this project.
 
+## RAGAS
+
+Working and routine. `--ragas` on any run now scores faithfulness and answer relevancy
+with near-full coverage, in about 10s per case.
+
+**The judge model was the entire problem**, not ragas and not the prompt:
+
+| Judge | Result |
+|---|---|
+| `nemotron-3-super-120b` (configured chat model) | 1/7 cases — reasoning trace breaks the structured-output parser |
+| `mistralai/mistral-nemotron` | parses, but ~186s/job; 12 samples exceeded 30 min and timed out |
+| `meta/llama-3.1-8b-instruct` | ~10s/case, near-full coverage — now the default |
+
+The earlier conclusion that "faithfulness is impractical, make it a nightly job" was
+wrong. It was a bad judge, and the fix was the same one that unblocked graph extraction:
+use a small model that does structured output reliably. Five cases went from
+unscoreable to 5/5 in 84 seconds.
+
+Graph mode was silently unscoreable until now — the router returned `contexts: []`, so
+ragas had nothing to judge against. `local_search` and `global_search` now return the
+context they actually gave the model.
+
+### Measured: same 15 multi-hop cases, vector vs graph
+
+| Metric | Vector | Graph |
+|---|---|---|
+| **Faithfulness** | 0.648 (n=12/15) | **0.854 (n=12/15)** |
+| **Answer relevancy** | 0.623 (n=14/15) | **0.903 (n=15/15)** |
+| Answer quality (term checks) | 3/15 | **10/15** |
+| Source recall | 0.555 | **0.826** |
+| Fully passed | 1/15 | **4/15** |
+
+Same questions, same judge, same corpus — the only variable is the retriever. This is
+the attributable before/after the plan set out to produce.
+
+Full 75-case factoid suite in fast mode, for reference: faithfulness 0.762 (n=70/73),
+relevancy 0.677 (n=73/73), 65/75 passed, p50 2.96s. Not comparable to the table above,
+which uses a different and much harder question set.
+
 ## Next steps
 
-1. **Faithfulness is judge-bound, and that is now the blocker.** The judge model was
+1. ~~Faithfulness is judge-bound~~ — **solved. See RAGAS below.** (Original diagnosis kept for the record:) The judge model was
    swapped to `mistralai/mistral-nemotron` (verified live, 0.7s on a single call,
    non-reasoning, no thinking trace to break ragas' parser). That fixed the *parsing*
    failure but not the cost, and the cost is now the blocker.
@@ -279,20 +317,27 @@ Now partly measured. Status of each original claim:
 
 | Claim | Status |
 |---|---|
-| RAGAS faithfulness 64→91%, relevance 68→89%, n=100 | Still no basis. n=75 exists now; faithfulness pending, relevancy usable but unmeasured across the set. |
+| RAGAS faithfulness 64→91%, relevance 68→89%, n=100 | Replaced with measured numbers: faithfulness **0.648 → 0.854**, relevancy **0.623 → 0.903**, n=15, by swapping vector retrieval for the entity graph. Not 91%, and n=15 not 100 — but real and reproducible from `evals/`. |
 | BM25 + dense + cross-encoder via RRF | Misdescribed. Hybrid fusion is Neo4j's Lucene fulltext index; RRF fuses multi-query variants. Reranker defaults off and is skipped in fast mode. |
 | JWT role-scoped retrieval (HR/Finance/Admin) | Does not exist. Build it or drop it. |
 | FastAPI streaming | No streaming endpoint. |
 | CI gate on >5% faithfulness regression | CI runs ruff/mypy/pytest only. See next steps 5. |
 | p95 < 2.5s over 500+ queries | **p50 is 2.33s, p95 is 8.17s at n=75.** The p50 claim survives; the p95 claim does not. |
 | LangGraph | In `pyproject.toml`, unused. `router.py` is LangChain + `ThreadPoolExecutor`. |
-| Neo4j knowledge graph | Vector store + fulltext index. `ingest.py` creates no relationships. |
+| Neo4j knowledge graph | **Now true.** 571 entities, 697 relationships, 3 Leiden/Louvain community levels, 117 community summaries, built by `scripts/graph_index.py`. Was a vector store with no relationships. |
 
-What is defensible today: *"Grew the eval set from 8 to 75 cases across 16 policy
-documents; the expanded set exposed two router defects that a keyword-based vagueness
-check had been hiding, which were refusing 25% of answerable questions. Functional pass
-rate 51% → 95%, p50 2.3s."* That survives someone opening the repo, because the
-before/after is in `evals/results_fast.jsonl` and the fixes are in `router.py`.
+What is defensible today:
+
+*"Built a GraphRAG layer over a 75-document policy corpus (Neo4j entity graph, hierarchical
+community detection, local/global search). On 15 multi-hop questions whose answers span
+4-19 documents, RAGAS faithfulness improved 0.65 → 0.85 and answer relevancy 0.62 → 0.90
+against the same corpus and judge."*
+
+*"Grew the eval suite from 8 to 90 cases; it immediately exposed two router defects that
+were refusing 25% of answerable questions."*
+
+Both survive someone opening the repo: the before/after is in `evals/results_multihop_*.jsonl`,
+the fixes are in `router.py`, and the index is reproducible from `scripts/graph_index.py`.
 
 ## Commands
 

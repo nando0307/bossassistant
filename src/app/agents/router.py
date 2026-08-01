@@ -320,7 +320,7 @@ def answer_question(
             "answer": graph_result["answer"],
             "sources": [{"source": source, "title": None, "preview": None} for source in graph_result["sources"]],
             "department_routed": "both",
-            "contexts": [],
+            "contexts": graph_result["contexts"],
         }
 
     if department is None and is_vague_subquestion(question):
