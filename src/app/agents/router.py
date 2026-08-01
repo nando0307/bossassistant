@@ -304,6 +304,17 @@ def _answer_single_question(
     }
 
 
+def departments_of(sources: list[str]) -> Literal["hr", "finance", "both"]:
+    """Infer which departments a set of cited document ids spans."""
+    has_hr = any(source.upper().startswith("HR") for source in sources)
+    has_finance = any(source.upper().startswith("FIN") for source in sources)
+    if has_hr and has_finance:
+        return "both"
+    if has_finance:
+        return "finance"
+    return "hr" if has_hr else "both"
+
+
 def answer_question(
     question: str,
     department: Department | None = None,
@@ -319,7 +330,12 @@ def answer_question(
         return {
             "answer": graph_result["answer"],
             "sources": [{"source": source, "title": None, "preview": None} for source in graph_result["sources"]],
-            "department_routed": "both",
+            # Report the departments actually cited rather than a blanket "both".
+            # Hardcoding "both" made graph mode look like it mis-routed 68 of 75
+            # factoid questions when its answers were in fact at parity with
+            # vector mode — the graph does not route, but it still knows which
+            # departments its evidence came from.
+            "department_routed": departments_of(graph_result["sources"]),
             "contexts": graph_result["contexts"],
         }
 

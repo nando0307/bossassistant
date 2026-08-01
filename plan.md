@@ -158,7 +158,7 @@ indexes.
 |---|---|---|---|
 | Fully passed | 1/15 | **4/15** | stable across 3 runs |
 | Answer quality (term checks) | 3/15 | **10/15** | 3.3x, after entity resolution |
-| Source recall | 0.553 | **0.826** | |
+| Source recall | 0.553 | **disputed — see note** | |
 | Source hits (strict superset) | 2/15 | **7-8/15** | |
 | Routing match | 4/15 | 13/15 | **artifact — see below** |
 | p50 latency | 5.94s | 9.14s | graph is slower |
@@ -260,6 +260,16 @@ context they actually gave the model.
 
 Same questions, same judge, same corpus — the only variable is the retriever. This is
 the attributable before/after the plan set out to produce.
+
+> **Source-recall figures for graph mode are not trustworthy as measured.** Local
+> search credited every document mentioning any one of its 32 matched entities,
+> citing a median of 27 of 75 policies per answer — 29 documents, 11 of them
+> Finance, for "how much PTO do I accrue". At that breadth, hitting the expected
+> source is nearly free, so recall is inflated and `department_routed` collapsed
+> to "both". Attribution now requires 3+ entity hits per document (the same guard
+> global search already had); the same question now cites HR-001 and HR-009 and
+> routes "hr". The faithfulness and answer-quality numbers are unaffected — they
+> never depended on the citation set — but recall must be re-measured.
 
 Full 75-case factoid suite in fast mode, for reference: faithfulness 0.762 (n=70/73),
 relevancy 0.677 (n=73/73), 65/75 passed, p50 2.96s. Not comparable to the table above,

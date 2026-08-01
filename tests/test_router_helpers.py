@@ -203,3 +203,18 @@ def test_canonical_key_keeps_distinct_roles_apart() -> None:
     # Plurals are folded against real entities elsewhere; blind stripping
     # would turn the IRS into "IR".
     assert canonical_key("IRS") == "irs"
+
+
+def test_departments_of_infers_from_cited_sources() -> None:
+    """Graph mode does not route, but it knows which departments it cited.
+
+    Reporting a blanket "both" made graph mode look like it mis-routed 68 of 75
+    factoid questions whose answers were actually correct.
+    """
+    from app.agents.router import departments_of
+
+    assert departments_of(["HR-001", "HR-008"]) == "hr"
+    assert departments_of(["FIN-002"]) == "finance"
+    assert departments_of(["HR-001", "FIN-002"]) == "both"
+    # No sources at all: nothing to claim, so stay neutral.
+    assert departments_of([]) == "both"

@@ -232,7 +232,7 @@ def global_search(
     }
 
 
-def local_search(question: str, top_entities: int = 32) -> GraphAnswer:
+def local_search(question: str, top_entities: int = 32, min_entity_hits: int = 3) -> GraphAnswer:
     """Answer from the neighbourhood of the entities the question names.
 
     The entity budget is wide on purpose. An inventory question ("what requires
@@ -268,10 +268,22 @@ def local_search(question: str, top_entities: int = 32) -> GraphAnswer:
             "mode": "local",
         }
 
+    # Attribute a document only when several of the matched entities land in it.
+    # Crediting every document that mentions any one of 32 entities cited a
+    # median of 27 of the 75 policies per answer — including 11 Finance
+    # documents for "how much PTO do I accrue" — which inflates source recall
+    # into meaninglessness and reports the department as "both" every time.
     context_parts = []
-    sources: set[str] = set()
+    hits: dict[str, int] = {}
     for row in rows:
-        sources.update(source for source in row["sources"] if source)
+        for source in row["sources"]:
+            if source:
+                hits[source] = hits.get(source, 0) + 1
+    sources = {source for source, count in hits.items() if count >= min_entity_hits}
+    if not sources:
+        # Never return zero attribution: fall back to the best-supported few.
+        sources = {source for source, _ in sorted(hits.items(), key=lambda kv: -kv[1])[:4]}
+    for row in rows:
         context_parts.append(
             f"{row['name']} ({row['type']}): {row['description']}\n"
             f"  related: {'; '.join(row['neighbours'])}\n"
