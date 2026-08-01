@@ -300,6 +300,21 @@ LLM-written *from* the source text, so an entity extracted only from a restricte
 discloses that policy in paraphrase even if the chunk itself is withheld. Entities are
 therefore only visible when the caller can read a chunk that mentions them.
 
+`global_search` is a different matter and **refuses ACL-scoped calls rather than
+under-enforcing**. Its community summaries are written once by an LLM across the whole
+corpus, so a summary of the "board approvals" cluster paraphrases the M&A policy whether
+or not the reader may open it; filtering only its sources would return an answer that
+looks scoped while its prose is not. Making it ACL-aware means summarizing per access
+tier at index time, deferred until global search is actually on a request path —
+`mode="graph"` routes to `local_search`, which filters properly.
+
+> A note on how this was found. The first version of the graph filter **silently did
+> nothing**: `local_search` accepted a `groups` argument, but the edit to its Cypher
+> never applied, so the parameter was ignored and an `all-employees` token retrieved the
+> executives-only M&A policy. A security control that is present in the signature and
+> absent from the query looks identical to a working one in code review. There is now a
+> test asserting `$groups` and `acl_groups` actually appear in the executed statement.
+
 ### The trade-off, measured
 
 Neo4j's vector index **cannot pre-filter**: `db.index.vector.queryNodes` picks ANN

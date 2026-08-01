@@ -455,21 +455,33 @@ def detect_communities(graph: Neo4jGraph) -> None:
 
 
 def summarize_communities(
-    graph: Neo4jGraph, model: str, workers: int, min_size: int, min_level: int
+    graph: Neo4jGraph,
+    model: str,
+    workers: int,
+    min_size: int,
+    min_level: int,
+    resummarize: bool = False,
 ) -> None:
+    """Summarize communities, skipping ones already done.
+
+    Resumable by default: a rebuild loses a handful of summaries to 429s every
+    time, and re-paying 45 LLM calls to recover 3 of them is the same waste the
+    extraction cache exists to avoid. `--resummarize` forces a full redo.
+    """
     communities = graph.query(
         """
         MATCH (c:Community)<-[:IN_COMMUNITY]-(e:Entity)
         WITH c, collect(e) AS members
         WHERE size(members) >= $min_size AND c.level >= $min_level
+          AND ($resummarize OR c.summary IS NULL)
         RETURN c.id AS id, c.level AS level,
                [m IN members | m.name + ' (' + m.type + '): ' + coalesce(m.description, '')] AS entities,
                [(a)-[r:RELATED]->(b) WHERE a IN members AND b IN members |
                  a.name + ' -> ' + b.name + ': ' + coalesce(r.description, '')] AS relationships
         """,
-        {"min_size": min_size, "min_level": min_level},
+        {"min_size": min_size, "min_level": min_level, "resummarize": resummarize},
     )
-    print(f"summarizing {len(communities)} communities (min_size={min_size}, min_level={min_level})")
+    print(f"summarizing {len(communities)} communities (min_size={min_size}, min_level={min_level}, resummarize={resummarize})")
     if not communities:
         return
 
@@ -547,6 +559,11 @@ def main() -> None:
     parser.add_argument("--workers", type=int, default=3, help="Kept low; the endpoint throttles at ~32 in-flight.")
     parser.add_argument("--min-community-size", type=int, default=3)
     parser.add_argument(
+        "--resummarize",
+        action="store_true",
+        help="Redo summaries that already exist instead of only filling gaps.",
+    )
+    parser.add_argument(
         "--min-community-level",
         type=int,
         default=1,
@@ -573,7 +590,12 @@ def main() -> None:
         detect_communities(graph)
     if args.stage in {"all", "summarize"}:
         summarize_communities(
-            graph, args.model, args.workers, args.min_community_size, args.min_community_level
+            graph,
+            args.model,
+            args.workers,
+            args.min_community_size,
+            args.min_community_level,
+            args.resummarize,
         )
     if args.stage in {"all", "summarize", "embed"}:
         embed_summaries(graph)

@@ -109,3 +109,35 @@ def test_restricted_documents_are_not_readable_by_all_employees() -> None:
     assert "all-employees" not in by_source["FIN-037"]  # M&A
     assert "all-employees" not in by_source["HR-011"]  # compensation bands
     assert "all-employees" in by_source["HR-001"]  # PTO
+
+
+def test_global_search_refuses_acl_scoped_calls() -> None:
+    """Global search must fail loudly rather than under-enforce.
+
+    Community summaries are LLM-written across the whole corpus, so filtering
+    their sources would return prose that paraphrases restricted policy behind
+    a citation list that looks correctly scoped.
+    """
+    import pytest
+
+    from app.retrieval.graphrag import global_search
+
+    with pytest.raises(NotImplementedError, match="cannot enforce ACLs"):
+        global_search("what requires board approval?", groups=frozenset({"all-employees"}))
+
+
+def test_local_search_signature_accepts_groups() -> None:
+    """Regression guard: `groups` was once accepted and silently ignored.
+
+    A Cypher edit failed to apply, so local_search took a groups argument and
+    filtered nothing — a security control that is present in the signature and
+    absent in the query. Assert the parameter reaches the statement.
+    """
+    import inspect
+
+    from app.retrieval import graphrag
+
+    assert "groups" in inspect.signature(graphrag.local_search).parameters
+    source = inspect.getsource(graphrag.local_search)
+    assert "$groups" in source, "local_search must pass groups into its Cypher"
+    assert "acl_groups" in source, "local_search must filter on chunk.acl_groups"

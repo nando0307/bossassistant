@@ -168,8 +168,27 @@ def global_search(
     top_communities: int = 8,
     level: int = 1,
     workers: int = 4,
+    groups: frozenset[str] | None = None,
 ) -> GraphAnswer:
-    """Map-reduce over the most relevant community summaries."""
+    """Map-reduce over the most relevant community summaries.
+
+    **Not ACL-safe, and refuses to pretend otherwise.** Community summaries are
+    written once, by an LLM, over entities drawn from the whole corpus — a
+    summary of the "board approvals" cluster paraphrases the M&A policy whether
+    or not the reader may open it. Filtering the *sources* afterwards would
+    return an answer that looks scoped while its prose is not.
+
+    Passing `groups` therefore raises instead of silently under-enforcing. Making
+    global search ACL-aware means summarizing per access tier at index time
+    (one summary set per group combination present in the corpus), which is
+    deferred until global search is actually on a request path — today
+    `mode="graph"` routes to `local_search`, which filters properly.
+    """
+    if groups is not None:
+        raise NotImplementedError(
+            "global_search cannot enforce ACLs: community summaries are written "
+            "across all documents. Use local_search for ACL-scoped retrieval."
+        )
     graph = connect()
     communities = rank_communities(graph, question, top_communities, level)
     if not communities:
@@ -266,14 +285,22 @@ def local_search(
         """
         CALL db.index.fulltext.queryNodes('entity_names', $query) YIELD node, score
         WITH node, score ORDER BY score DESC LIMIT $limit
-        OPTIONAL MATCH (node)<-[:MENTIONS]-(chunk)
+        MATCH (node)<-[:MENTIONS]-(chunk)
+        WHERE $groups IS NULL
+           OR any(g IN coalesce(chunk.acl_groups, []) WHERE g IN $groups)
+        WITH node, collect(DISTINCT chunk) AS readable
+        WHERE size(readable) > 0
         OPTIONAL MATCH (node)-[r:RELATED]-(neighbour:Entity)
         RETURN node.name AS name, node.type AS type, node.description AS description,
-               collect(DISTINCT chunk.source) AS sources,
-               collect(DISTINCT chunk.text)[..2] AS texts,
+               [c IN readable | c.source] AS sources,
+               [c IN readable | c.text][..2] AS texts,
                collect(DISTINCT neighbour.name + ': ' + coalesce(r.description, ''))[..6] AS neighbours
         """,
-        {"query": _fulltext_query(question), "limit": top_entities},
+        {
+            "query": _fulltext_query(question),
+            "limit": top_entities,
+            "groups": None if groups is None else sorted(groups),
+        },
     )
     if not rows:
         return {
