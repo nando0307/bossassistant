@@ -178,3 +178,28 @@ def test_fast_split_returns_none_for_no_terms() -> None:
     """When no department terms are found, returns None (falls to LLM)."""
     result = split_department_questions_fast("What happens next? Who decides?")
     assert result is None
+
+
+# ── graph entity resolution ───────────────────────────────────────────
+
+
+def test_canonical_key_merges_surface_variants() -> None:
+    """Extraction emitted "VP", "VP Approval", and "Department VP" separately,
+    so a traversal from one missed the edges on the others."""
+    from scripts.graph_index import canonical_key
+
+    assert canonical_key("VP") == canonical_key("VP Approval") == "vp"
+    assert canonical_key("CFO") == canonical_key("CFO approval") == "cfo"
+    assert canonical_key("Travel") == canonical_key("Travel Policy") == "travel"
+
+
+def test_canonical_key_keeps_distinct_roles_apart() -> None:
+    """Merging these would be a regression, not a fix."""
+    from scripts.graph_index import canonical_key
+
+    assert canonical_key("VP of Sales") != canonical_key("VP")
+    assert canonical_key("Hiring Manager") != canonical_key("Manager")
+    assert canonical_key("Finance Manager") != canonical_key("Manager")
+    # Plurals are folded against real entities elsewhere; blind stripping
+    # would turn the IRS into "IR".
+    assert canonical_key("IRS") == "irs"

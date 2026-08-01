@@ -272,6 +272,125 @@ def write_graph(graph: Neo4jGraph, extracted: dict[str, dict[str, Any]]) -> None
     print(f"graph written: {stats}")
 
 
+#: Qualifiers that describe an action performed on an entity rather than a
+#: different entity: "VP Approval" is the role VP, "Travel Policy" is the topic
+#: Travel. Stripped from the tail only.
+_TRAILING_QUALIFIERS = (
+    "approval",
+    "approvals",
+    "policy",
+    "policies",
+    "process",
+    "processes",
+    "requirement",
+    "requirements",
+)
+
+
+def canonical_key(name: str) -> str:
+    """Collapse surface variants of the same entity onto one key.
+
+    Deliberately conservative. Leading words are never stripped, because
+    "VP of Sales", "Hiring Manager", and "Finance Manager" are genuinely
+    different roles from "VP" and "Manager" — merging those would be a
+    regression, not a fix. Only trailing qualifiers and possessives go here;
+    plurals are folded in `resolve_entities`, where the singular form can be
+    checked against entities that actually exist (blind stripping turns "IRS"
+    into "IR").
+    """
+    key = " ".join(name.lower().replace("'s", "").replace("\u2019s", "").split())
+    changed = True
+    while changed:
+        changed = False
+        for qualifier in _TRAILING_QUALIFIERS:
+            suffix = f" {qualifier}"
+            if key.endswith(suffix) and len(key) > len(suffix):
+                key = key[: -len(suffix)].strip()
+                changed = True
+    return key
+
+
+def resolve_entities(graph: Neo4jGraph) -> None:
+    """Merge surface variants onto one node, redirecting their edges.
+
+    Extraction produced "VP", "VP Approval", and "Department VP" as three
+    unconnected nodes, so a traversal from any one of them missed the
+    relationships hanging off the others — which is exactly how an aggregation
+    question ends up incomplete.
+    """
+    rows = graph.query("MATCH (e:Entity) RETURN e.key AS key, e.name AS name")
+    groups: dict[str, list[str]] = {}
+    for row in rows:
+        groups.setdefault(canonical_key(row["name"]), []).append(row["key"])
+
+    # Fold "managers" into "manager" only when the singular is itself an entity.
+    for plural in [k for k in groups if k.endswith("s") and not k.endswith("ss")]:
+        singular = plural[:-1]
+        if singular in groups:
+            groups[singular].extend(groups.pop(plural))
+
+    merges = []
+    for canonical, keys in groups.items():
+        if len(keys) < 2:
+            continue
+        # Keep the shortest name: it is the bare entity, not a phrase wrapping it.
+        survivor = min(keys, key=lambda k: (len(k), k))
+        merges.append(
+            {"survivor": survivor, "duplicates": [k for k in keys if k != survivor], "canonical": canonical}
+        )
+    if not merges:
+        print("entity resolution: nothing to merge")
+        return
+
+    total = sum(len(m["duplicates"]) for m in merges)
+    print(f"entity resolution: merging {total} nodes into {len(merges)} survivors")
+    for step in (
+        """
+        UNWIND $merges AS m
+        MATCH (survivor:Entity {key: m.survivor})
+        UNWIND m.duplicates AS dupKey
+        MATCH (dup:Entity {key: dupKey})
+        MATCH (chunk)-[:MENTIONS]->(dup)
+        MERGE (chunk)-[:MENTIONS]->(survivor)
+        """,
+        """
+        UNWIND $merges AS m
+        MATCH (survivor:Entity {key: m.survivor})
+        UNWIND m.duplicates AS dupKey
+        MATCH (dup:Entity {key: dupKey})
+        MATCH (dup)-[r:RELATED]->(other:Entity)
+        WHERE other <> survivor
+        MERGE (survivor)-[nr:RELATED]->(other)
+          ON CREATE SET nr.description = r.description, nr.weight = r.weight
+        """,
+        """
+        UNWIND $merges AS m
+        MATCH (survivor:Entity {key: m.survivor})
+        UNWIND m.duplicates AS dupKey
+        MATCH (dup:Entity {key: dupKey})
+        MATCH (other:Entity)-[r:RELATED]->(dup)
+        WHERE other <> survivor
+        MERGE (other)-[nr:RELATED]->(survivor)
+          ON CREATE SET nr.description = r.description, nr.weight = r.weight
+        """,
+        """
+        UNWIND $merges AS m
+        UNWIND m.duplicates AS dupKey
+        MATCH (dup:Entity {key: dupKey})
+        DETACH DELETE dup
+        """,
+    ):
+        graph.query(step, {"merges": merges})
+
+    stats = graph.query(
+        "MATCH (e:Entity) WITH count(e) AS entities "
+        "MATCH ()-[r:RELATED]->() WITH entities, count(r) AS rels "
+        "MATCH (s:Entity) WHERE COUNT{(s)<-[:MENTIONS]-()} = 1 "
+        "RETURN entities, rels, count(s) AS singletons"
+    )
+    print(f"after resolution: {stats}")
+
+
 def detect_communities(graph: Neo4jGraph) -> None:
     """Hierarchical Leiden over the entity graph.
 
@@ -436,7 +555,7 @@ def main() -> None:
     )
     parser.add_argument(
         "--stage",
-        choices=["all", "extract", "write", "communities", "summarize", "embed"],
+        choices=["all", "extract", "write", "resolve", "communities", "summarize", "embed"],
         default="all",
     )
     args = parser.parse_args()
@@ -448,6 +567,8 @@ def main() -> None:
         extracted = extract_all(graph, args.model, args.cache, args.workers)
     if args.stage in {"all", "write"}:
         write_graph(graph, extracted)
+    if args.stage in {"all", "resolve"}:
+        resolve_entities(graph)
     if args.stage in {"all", "communities"}:
         detect_communities(graph)
     if args.stage in {"all", "summarize"}:

@@ -158,8 +158,8 @@ indexes.
 | Metric | Vector (fast) | Graph | |
 |---|---|---|---|
 | Fully passed | 1/15 | **4/15** | stable across 3 runs |
-| Answer quality (term checks) | 3/15 | **8-9/15** | ~3x |
-| Source recall | 0.553 | **0.82-0.87** | |
+| Answer quality (term checks) | 3/15 | **10/15** | 3.3x, after entity resolution |
+| Source recall | 0.553 | **0.826** | |
 | Source hits (strict superset) | 2/15 | **7-8/15** | |
 | Routing match | 4/15 | 13/15 | **artifact — see below** |
 | p50 latency | 5.94s | 9.14s | graph is slower |
@@ -248,10 +248,19 @@ this project.
    only on the subset; or move scoring to a nightly job (step 5) and stop treating it
    as something a developer waits on. `--ragas-workers` and `--ragas-timeout` are now
    flags so this is tunable without editing the script.
-2. **Close the remaining multi-hop gaps.** 6 of 15 still fail on completeness —
-   answers miss "sabbatical", "$25,000", "commission". Raising the entity budget
-   again is the obvious next lever, then entity resolution (merging "VP",
-   "VP-level", "Vice President", which are currently distinct nodes).
+2. **Entity resolution done, with a modest payoff.** `--stage resolve` folds
+   trailing qualifiers and possessives ("VP Approval" -> "VP", "Travel Policy" ->
+   "Travel") and folds plurals only when the singular is itself an entity, so
+   "IRS" does not become "IR". Leading words are never stripped: "VP of Sales"
+   and "Hiring Manager" are different roles from "VP" and "Manager", and merging
+   them would be a regression. Merged 25 nodes (596 -> 571 entities, singletons
+   461 -> 430) and moved multi-hop answer quality from 8-9/15 to **10/15**.
+
+   The remaining ceiling is not duplication. 430 of 571 entities are still
+   mentioned by exactly one chunk, but most are genuinely single-mention
+   (specific thresholds, one-off obligations), so further merging has little
+   left to collect. `fully_passed` stays 4/15 because `source_hit` demands a
+   strict superset of 4-9 expected documents.
 3. **Reranker on vs. off is now lower priority.** The graph delta is the better
    before/after story and it is measured. Note the cost if still wanted: deep mode
    uses `nemotron-3-ultra-550b` and a local `BAAI/bge-reranker-large` (~1.5GB).
