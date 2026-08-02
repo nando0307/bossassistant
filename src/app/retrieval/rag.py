@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 import re
 from functools import lru_cache
+from collections.abc import Iterator
 from typing import Any, Literal, cast
 
 from langchain_core.documents import Document
@@ -335,6 +336,68 @@ def format_abstention(docs: list[Document]) -> str:
         f"{ABSTENTION_PREFIX}. I checked the following and none of them answer "
         f"this question: {', '.join(checked)}."
     )
+
+
+def _build_answer_chain(question: str, department: Department, docs: list[Document], mode: RetrievalMode) -> Any:
+    prompt = ChatPromptTemplate.from_template(RAG_TEMPLATE)
+    return (prompt | get_llm_for_mode(mode) | StrOutputParser()), {
+        "department": INDEX_CONFIG[department]["department_name"],
+        "context": format_docs(docs),
+        "question": question,
+        "abstain_marker": ABSTAIN_MARKER,
+    }
+
+
+def stream_department(
+    question: str,
+    department: Department,
+    mode: RetrievalMode = "fast",
+    groups: frozenset[str] | None = None,
+) -> Iterator[tuple[str, Any]]:
+    """Yield ("sources", docs) then ("token", str)... then ("done", answer).
+
+    Retrieval finishes before the first token, so `sources` can be sent up front
+    — that is most of the perceived-latency win, since the reader sees which
+    policies are being read while generation is still running.
+
+    Abstention needs care when streaming. The model is told to reply with the
+    bare marker, which must never reach the client as literal tokens, so the
+    head of the stream is buffered until it can no longer be the marker. That
+    costs a few tokens of latency on every answer and is the price of not
+    leaking an internal sentinel to the UI.
+    """
+    docs = retrieve(question, department, mode=mode, groups=groups)
+    yield "sources", docs
+
+    chain, payload = _build_answer_chain(question, department, docs, mode)
+    buffer = ""
+    holding = True
+    emitted: list[str] = []
+    for chunk in chain.stream(payload, config=langchain_config("department_answer_stream")):
+        if not chunk:
+            continue
+        if holding:
+            buffer += chunk
+            if ABSTAIN_MARKER.startswith(buffer.strip()[: len(ABSTAIN_MARKER)]) and len(
+                buffer.strip()
+            ) < len(ABSTAIN_MARKER):
+                continue  # still could become the marker
+            holding = False
+            if ABSTAIN_MARKER in buffer:
+                message = format_abstention(docs)
+                yield "token", message
+                yield "done", message
+                return
+            emitted.append(buffer)
+            yield "token", buffer
+            continue
+        emitted.append(chunk)
+        yield "token", chunk
+
+    answer = "".join(emitted) or buffer
+    if is_abstention(answer):
+        answer = format_abstention(docs)
+    yield "done", answer
 
 
 def answer_department(

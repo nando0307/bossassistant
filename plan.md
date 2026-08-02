@@ -553,6 +553,63 @@ Per-sentence citation verification on the request path — dropping any sentence
 not map to a retrieved chunk. Faithfulness is computed offline today; moving a cheap
 version inline is the remaining piece of this item.
 
+## SSE streaming — and what it actually bought
+
+`POST /ask/stream` emits Server-Sent Events: `meta`, then `sources_formatted`, then
+`token` events, then `done`. Errors arrive as an `error` event rather than an HTTP status,
+because the 200 is long gone by the time generation can fail.
+
+Two design points worth stating:
+
+* **Every payload is JSON-encoded, including plain token strings.** A raw newline inside a
+  token terminates the SSE frame and silently truncates the answer — a numbered-list
+  answer would arrive cut in half.
+* **The abstention sentinel is buffered, not streamed.** The model is told to reply with
+  the bare `NOT_COVERED_IN_POLICY` marker, which must never reach the UI as literal
+  tokens, so the head of the stream is held until it can no longer become the marker.
+
+Only the single-department path streams token by token. Graph mode, the clarification
+reply, and the cross-department fan-out emit one `token` event carrying the whole answer —
+the fan-out because it runs HR and Finance concurrently, and serialising them to stream in
+order would trade a real latency win for a perceived one.
+
+### The measurement contradicts the reason for building it
+
+Streaming was supposed to be the cheap perceived-latency win. Measured on this stack, it
+is not — because generation is a small and *late* fraction of the request:
+
+| question | sources at | first token at | done at | generation share |
+|---|---|---|---|---|
+| short ("how much PTO") | 1.15s | 2.47s | 2.65s | 7% |
+| long (full travel policy) | 3.90s | 12.83s | 12.87s | **0.3%** |
+
+The long answer arrived as **one 1906-character event after nine seconds of silence**. The
+configured chat model is a reasoning model: it thinks internally, then emits the whole
+answer. Token streaming cannot hide latency that occurs before the first token exists.
+
+Time-to-first-token is a property of the model, not of the transport:
+
+| model | chunks | first token | total |
+|---|---|---|---|
+| `nemotron-3-super-120b` (configured) | 99 | **3.18s** | 5.74s |
+| `mistralai/mistral-nemotron` | 296 | **0.39s** | 6.60s |
+| `meta/llama-3.1-8b-instruct` | 277 | **0.44s** | 3.26s |
+
+**The real win is the `sources` event, not the tokens.** On the long question the reader
+sees which policies are being consulted at 3.90s instead of waiting 12.87s — progress
+visible 70% earlier — and that holds regardless of model.
+
+Two conclusions, neither of which was the assumption going in:
+
+1. Streaming's value here is gated on **model choice**. Switching the answer model to a
+   non-reasoning one would cut time-to-first-token roughly 8x and make token streaming
+   worth having. That is a real trade against answer quality and would invalidate the
+   frozen eval baselines, so it is a decision to take deliberately, not a side effect of
+   shipping streaming.
+2. For this workload, **retrieval optimisation would beat streaming** on perceived
+   latency — the opposite of the usual advice. Retrieval is 43-100% of the wall clock in
+   the table above.
+
 ## Next steps
 
 1. ~~Faithfulness is judge-bound~~ — **solved. See RAGAS below.** (Original diagnosis kept for the record:) The judge model was
@@ -608,7 +665,7 @@ Now partly measured. Status of each original claim:
 | RAGAS faithfulness 64→91%, relevance 68→89%, n=100 | Faithfulness 0.648 → 0.854 and relevancy 0.623 → 0.903 were measured at n=15, but **predate the source-attribution fix** and need re-running before use. The durable claim is answer quality on multi-hop questions: **3/15 → 7/15**. |
 | BM25 + dense + cross-encoder via RRF | Misdescribed. Hybrid fusion is Neo4j's Lucene fulltext index; RRF fuses multi-query variants. Reranker defaults off and is skipped in fast mode. |
 | JWT role-scoped retrieval (HR/Finance/Admin) | **Now real**, and more interesting than the original claim: 5 groups that cut across department, filtered at retrieval rather than post-hoc, with the post-ANN recall cost measured (`evals/acl_recall.json`). |
-| FastAPI streaming | No streaming endpoint. |
+| FastAPI streaming | **Now real**: `POST /ask/stream` emits SSE. But measured honestly, token streaming buys ~0-7% here because the configured reasoning model emits after thinking; the perceived-latency win comes from sending sources first (visible 70% earlier). |
 | CI gate on >5% faithfulness regression | CI runs ruff/mypy/pytest only. See next steps 5. |
 | p95 < 2.5s over 500+ queries | **p50 is 2.33s, p95 is 8.17s at n=75.** The p50 claim survives; the p95 claim does not. |
 | LangGraph | In `pyproject.toml`, unused. `router.py` is LangChain + `ThreadPoolExecutor`. |

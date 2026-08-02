@@ -2,8 +2,9 @@ from __future__ import annotations
 
 import json
 import re
+from collections.abc import Iterator
 from concurrent.futures import Future, ThreadPoolExecutor
-from typing import Literal, TypedDict, cast
+from typing import Any, Literal, TypedDict, cast
 
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import ChatPromptTemplate
@@ -19,6 +20,7 @@ from app.retrieval.rag import (
     format_sources,
     get_llm,
     is_abstention_message,
+    stream_department,
 )
 
 
@@ -262,6 +264,63 @@ def split_department_questions(question: str) -> DepartmentQuestions:
             hr_question=question,
             finance_question=question,
         )
+
+
+def stream_question(
+    question: str,
+    department: Department | None = None,
+    mode: RetrievalMode = "fast",
+    groups: frozenset[str] | None = None,
+) -> Iterator[tuple[str, Any]]:
+    """Stream an answer, falling back to a single event when streaming does not apply.
+
+    Only the single-department path streams token by token. The clarification
+    reply, graph mode, and the cross-department fan-out all produce their text in
+    one piece — the fan-out because it runs HR and Finance concurrently, and
+    serialising them to stream in order would trade a real latency win for a
+    perceived one. Those yield one "token" event carrying the whole answer, so
+    the client handles a single event shape either way.
+    """
+    if mode == "graph" or (department is None and is_vague_subquestion(question)) or (
+        department is None and len(split_user_questions(question)) > 1
+    ):
+        result = answer_question(question, department, mode=mode, groups=groups)
+        yield "meta", {
+            "department_routed": result["department_routed"],
+            "abstained": result["abstained"],
+            "streamed": False,
+        }
+        yield "sources_formatted", result["sources"]
+        yield "token", result["answer"]
+        yield "done", result["answer"]
+        return
+
+    route: Department = department if department is not None else cast(Department, None)
+    if department is None:
+        routed = route_question(question)
+        if routed == "both":
+            result = answer_question(question, department, mode=mode, groups=groups)
+            yield "meta", {
+                "department_routed": result["department_routed"],
+                "abstained": result["abstained"],
+                "streamed": False,
+            }
+            yield "sources_formatted", result["sources"]
+            yield "token", result["answer"]
+            yield "done", result["answer"]
+            return
+        route = routed
+
+    yield "meta", {"department_routed": route, "abstained": None, "streamed": True}
+    answer = ""
+    for event, data in stream_department(question, route, mode=mode, groups=groups):
+        if event == "sources":
+            yield "sources_formatted", format_sources(data)
+        elif event == "token":
+            yield "token", data
+        elif event == "done":
+            answer = data
+    yield "done", answer
 
 
 def _answer_single_question(
