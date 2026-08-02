@@ -330,6 +330,68 @@ FIN_DOCS: list[Document] = [
     ),
 ]
 
+
+# ── Revisions ────────────────────────────────────────────────────────
+#
+# Real policy corpora are not static, and the failure that matters is the
+# assistant confidently quoting a rule that was replaced last quarter. These two
+# documents supersede earlier ones with *different numbers*, so a retrieval bug
+# that ignores supersession produces a visibly wrong answer rather than a subtle
+# one. HR-016 and FIN-020 are used because no eval case cites them.
+
+HR_DOCS.append(
+    Document(
+        page_content="""Jury Duty and Civic Leave (2026 revision). The company provides paid leave for jury duty for up to 15 business days per calendar year, increased from the previous 10-day cap. Employees forward the court summons to HR within 5 business days of receipt. Any jury stipend received from the court is retained by the employee and is not offset against pay. Voting leave of up to 4 hours is available where local law requires it. Military reserve duty follows applicable law and may extend beyond the 15-day civic leave cap with HR and VP approval.""",
+        metadata={
+            "source": "HR-039",
+            "title": "Jury Duty and Civic Leave (2026 revision)",
+            "department": "hr",
+            "effective_date": "2026-07-01",
+            "supersedes": "HR-016",
+        },
+    )
+)
+
+FIN_DOCS.append(
+    Document(
+        page_content="""Insurance Coverage (2026 revision). The company maintains general liability, directors and officers, cyber liability, errors and omissions, workers' compensation, and corporate travel insurance. Travel insurance applies automatically to trips booked through Navan and includes medical evacuation. Cyber liability coverage requires that the company maintain the security controls described in the Information Security Policy; lapses can void coverage. Certificates of insurance are issued by Finance on request, typically within 3 business days. Policies now renew annually on September 1 rather than July 1.""",
+        metadata={
+            "source": "FIN-038",
+            "title": "Insurance Coverage (2026 revision)",
+            "department": "finance",
+            "effective_date": "2026-09-01",
+            "supersedes": "FIN-020",
+        },
+    )
+)
+
+#: Default effective date for the original corpus.
+BASELINE_EFFECTIVE_DATE = "2024-01-01"
+
+
+def _apply_lifecycle(docs: list[Document]) -> list[Document]:
+    """Stamp effective dates and resolve supersession links both ways.
+
+    Retrieval filters on `superseded_by`, so the pointer has to live on the
+    *old* document. Deriving it from each revision's `supersedes` keeps the two
+    ends from drifting: there is one place to edit when a policy is replaced.
+    """
+    for doc in docs:
+        doc.metadata.setdefault("effective_date", BASELINE_EFFECTIVE_DATE)
+        doc.metadata.setdefault("superseded_by", None)
+    by_source = {doc.metadata["source"]: doc for doc in docs}
+    for doc in docs:
+        replaced = doc.metadata.get("supersedes")
+        if replaced:
+            if replaced not in by_source:
+                raise ValueError(f"{doc.metadata['source']} supersedes unknown document {replaced}")
+            by_source[replaced].metadata["superseded_by"] = doc.metadata["source"]
+    return docs
+
+
+_apply_lifecycle(HR_DOCS)
+_apply_lifecycle(FIN_DOCS)
+
 #: Keyed to match `INDEX_CONFIG` in `app.retrieval.rag`; declared locally so the
 #: corpus module stays free of retrieval imports.
 #: Groups permitted to retrieve each document. Everything not listed here is

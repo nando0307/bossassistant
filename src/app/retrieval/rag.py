@@ -39,6 +39,9 @@ question based ONLY on the context below. If the context doesn't contain the ans
 say you don't have that information in your policies - do not guess.
 
 Be concise. Cite the policy document title when relevant.
+Each context entry carries the date its policy took effect. When you state a
+specific figure, deadline, or threshold, note the effective date of the policy it
+came from, e.g. "15 days (PTO Policy, effective 2024-01-01)".
 Answer only the specific question asked. Do not list unrelated policy categories just because they appear in context.
 If the user asks whether a specific item, service, or expense is allowed, answer yes only when that specific item or a clearly matching category appears in the context.
 If the context only gives general reimbursement rules or unrelated examples, say you don't have that specific information in your policies.
@@ -210,7 +213,7 @@ def retrieve(
     # Over-fetch only when a filter will actually be applied.
     fetch_k = retrieval_candidates * overfetch if groups is not None else retrieval_candidates
     results = [vector_store.similarity_search(query, k=fetch_k) for query in all_queries]
-    fused = filter_by_acl(reciprocal_rank_fusion(results), groups)
+    fused = drop_superseded(filter_by_acl(reciprocal_rank_fusion(results), groups))
     return rerank(question, fused[:retrieval_candidates], top_k=final_k, mode=mode)
 
 
@@ -219,7 +222,27 @@ def clean_page_content(page_content: str) -> str:
 
 
 def format_docs(docs: list[Document]) -> str:
-    return "\n\n".join(f"[{doc.metadata.get('title', '?')}] {clean_page_content(doc.page_content)}" for doc in docs)
+    """Render retrieved chunks, carrying each policy's effective date.
+
+    The date is in the context because a policy answer without a vintage is
+    unverifiable — the reader cannot tell whether it reflects the current rule.
+    """
+    return "\n\n".join(
+        f"[{doc.metadata.get('title', '?')}, effective {doc.metadata.get('effective_date', 'unknown')}] "
+        f"{clean_page_content(doc.page_content)}"
+        for doc in docs
+    )
+
+
+def drop_superseded(docs: list[Document]) -> list[Document]:
+    """Remove chunks belonging to policies that a later revision replaced.
+
+    This is the failure that makes a policy assistant untrustworthy rather than
+    merely unhelpful: confidently quoting a rule that was replaced last quarter,
+    with a citation that looks legitimate because the document really does exist.
+    Filtered at retrieval, so superseded text never reaches the prompt.
+    """
+    return [doc for doc in docs if not doc.metadata.get("superseded_by")]
 
 
 def dedupe_sources(sources: list[dict[str, str | None]]) -> list[dict[str, str | None]]:
@@ -246,6 +269,7 @@ def format_sources(docs: list[Document]) -> list[dict[str, str | None]]:
             "source": doc.metadata.get("source"),
             "title": doc.metadata.get("title"),
             "department": doc.metadata.get("department"),
+            "effective_date": doc.metadata.get("effective_date"),
             "preview": clean_page_content(doc.page_content)[:240],
         }
         for doc in docs

@@ -348,6 +348,68 @@ Two things this shows that an opinion would not:
 The 0.970 ceiling is not an ACL cost: it persists at f=12 and is the hybrid ANN index's
 own approximation error against exact cosine.
 
+## Ingestion that survives a changing corpus
+
+`scripts/ingest.py` was a one-shot create-only script: re-running it either duplicated
+every chunk or demanded `--reset`, and `--reset` destroys the GraphRAG entity graph built
+on top of those nodes. It is now incremental.
+
+Chunks have a stable identity — `(source, chunk_idx)` — plus a `content_hash`:
+
+| state | action |
+|---|---|
+| unchanged | skipped entirely: no embedding call, no write |
+| changed | re-embedded, updated in place |
+| new | created |
+| no longer produced by the corpus | **deleted** |
+
+**Idempotency is asserted, not claimed.** Second run over an unchanged corpus:
+`146 unchanged, 0 writes, 0 embedding calls`. `tests/test_ingest.py` pins it with a fake
+graph so it keeps running without Aura credentials.
+
+Three subtleties that cost real incidents:
+
+1. **`chunk_idx` is per-document, not per-department.** Splitting a whole department at
+   once makes every index depend on how many chunks preceded it, so a one-word edit near
+   the top marks the entire corpus changed and re-embeds all of it.
+2. **Shortened documents orphan their tail.** A document that used to split into 4 chunks
+   and now splits into 2 leaves chunks 2 and 3 behind — still retrievable, still cited.
+3. **Legacy nodes migrate themselves.** The old ingester wrote no `chunk_idx`. Filtering
+   those out of the diff would have hidden them and written a second full set alongside;
+   treating them as unmatched puts them on the delete path. The dry run caught this
+   before it ran: `new 73, deleted 0` on the first attempt, which would have left 288
+   chunks where 146 belong.
+
+Deletes use `DETACH DELETE` because these chunks carry `MENTIONS` edges into the entity
+graph — leaving the relationships would keep a withdrawn policy reachable through
+entities even after its chunk is gone.
+
+### Supersession
+
+Documents carry `effective_date`, and a revision declares `supersedes`; the reverse
+`superseded_by` pointer is derived so there is one place to edit when a policy is
+replaced. Superseded chunks are dropped **at retrieval**, in both vector and graph modes,
+so replaced text never enters the prompt.
+
+Two real revisions exercise it: HR-039 replaces HR-016 (jury duty 10 -> 15 days) and
+FIN-038 replaces FIN-020 (insurance renewal July 1 -> September 1). Both were chosen
+because no eval case cites them, so supersession is demonstrable without rewriting the
+suite. Verified live on "How many days of paid jury duty leave do I get per year?":
+
+| mode | sources | answer |
+|---|---|---|
+| fast | HR-039, HR-001, HR-017, HR-015 | "15 business days per calendar year (Jury Duty and Civic Leave, **effective 2026-07-01**)" |
+| graph | HR-039 (+ others), **no HR-016** | "15 business days" |
+
+Answers now carry the vintage of the policy they quote, because a policy figure without
+an effective date cannot be verified by the person reading it.
+
+**Not done: layout-aware parsing of real PDFs.** The corpus is still clean synthetic
+prose, which does not exercise table extraction, multi-column layout, or headers bleeding
+into chunks. This needs real source documents rather than better code — generating PDFs
+from this same text would test nothing. Public HR/finance policy PDFs or SEC filings are
+the realistic input.
+
 ## Next steps
 
 1. ~~Faithfulness is judge-bound~~ — **solved. See RAGAS below.** (Original diagnosis kept for the record:) The judge model was

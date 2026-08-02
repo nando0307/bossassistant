@@ -148,8 +148,9 @@ def community_sources(
         """
         UNWIND $ids AS cid
         MATCH (:Community {id: cid})<-[:IN_COMMUNITY]-(e:Entity)<-[:MENTIONS]-(chunk)
-        WHERE $groups IS NULL
-           OR any(g IN coalesce(chunk.acl_groups, []) WHERE g IN $groups)
+        WHERE chunk.superseded_by IS NULL
+          AND ($groups IS NULL
+               OR any(g IN coalesce(chunk.acl_groups, []) WHERE g IN $groups))
         WITH chunk.source AS source, count(DISTINCT e) AS hits
         WHERE source IS NOT NULL AND hits >= $min_entities
         RETURN source ORDER BY hits DESC
@@ -286,8 +287,9 @@ def local_search(
         CALL db.index.fulltext.queryNodes('entity_names', $query) YIELD node, score
         WITH node, score ORDER BY score DESC LIMIT $limit
         MATCH (node)<-[:MENTIONS]-(chunk)
-        WHERE $groups IS NULL
-           OR any(g IN coalesce(chunk.acl_groups, []) WHERE g IN $groups)
+        WHERE chunk.superseded_by IS NULL
+          AND ($groups IS NULL
+               OR any(g IN coalesce(chunk.acl_groups, []) WHERE g IN $groups))
         WITH node, collect(DISTINCT chunk) AS readable
         WHERE size(readable) > 0
         OPTIONAL MATCH (node)-[r:RELATED]-(neighbour:Entity)
