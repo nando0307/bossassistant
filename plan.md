@@ -668,6 +668,41 @@ Two honesty constraints:
 A test asserts every model actually in use is priced, so adding a model without a rate
 fails rather than silently reporting every request as free.
 
+## Multi-turn follow-ups
+
+The frontend holds conversation state; the backend did not. A follow-up like "what about
+internationally?" was retrieved on its own words, losing the topic entirely — and the
+failure is invisible from the outside, because something plausible comes back.
+
+`rewrite_followup()` resolves a follow-up against the last few turns before anything else
+happens. Measured, same question, with and without history:
+
+| follow-up | without history | with history |
+|---|---|---|
+| "What about internationally?" | *"Not covered in policy. I checked HR-003, HR-021, HR-025, HR-031"* | **"$400 per night (Travel Policy, effective 2024-01-01)"** |
+| "And is there anything for degree programs?" | correct ($5,250) | correct ($5,250) |
+
+The first row is the whole point: without context it retrieved remote-work documents and
+answered a question nobody asked. Note it **abstained rather than inventing** — the
+abstention work turned what would have been a confident wrong answer into a visible
+failure, which is how the miss became diagnosable at all.
+
+The second row is equally worth keeping: "degree programs" is distinctive enough to
+retrieve unaided, so the rewrite only stripped a leading "And". **Not every follow-up
+needs rewriting**, which is why a cheap referential gate runs first — rewriting every turn
+costs an LLM call and risks the rewriter quietly changing what was asked.
+
+Three design points:
+
+* **Rewrite happens before the cache lookup.** "What about contractors?" is not a cache
+  key; the resolved question is. Two users mid-different-conversations send identical
+  follow-up text meaning different things.
+* **History is untrusted.** It is user-supplied text arriving in a prompt, so the rewrite
+  system prompt tells the model to ignore instructions inside it.
+* **A failed rewrite returns the original question** rather than failing the request, and
+  an over-long rewrite is discarded — a rewriter that returns an essay has misunderstood,
+  and retrieving on its output would be worse than retrieving on the raw follow-up.
+
 ## Next steps
 
 1. ~~Faithfulness is judge-bound~~ — **solved. See RAGAS below.** (Original diagnosis kept for the record:) The judge model was

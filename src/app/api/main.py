@@ -45,6 +45,9 @@ class AskRequest(BaseModel):
     question: str = Field(..., min_length=1)
     department: Literal["hr", "finance"] | None = None
     mode: RetrievalMode = "fast"
+    #: Prior turns, oldest first, as {"role": "user"|"assistant", "content": ...}.
+    #: Only used to resolve references in a follow-up; treated as untrusted text.
+    history: list[dict[str, str]] | None = None
     include_contexts: bool = False
     """Return the full retrieved chunks. Off by default — the eval harness
     needs them for RAGAS faithfulness; the UI only needs `sources`."""
@@ -186,6 +189,7 @@ def ask(
             request.department,
             mode=request.mode,
             groups=principal.groups,
+            history=request.history,
         )
     except Exception as exc:  # noqa: BLE001 - provider raises bare Exception
         message = str(exc)

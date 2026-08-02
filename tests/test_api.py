@@ -14,7 +14,7 @@ from tests.helpers import auth_headers, make_token
 def test_ask_defaults_to_fast_mode(monkeypatch: Any) -> None:
     captured: dict[str, Any] = {}
 
-    def fake_answer_question(question: str, department: str | None = None, mode: str = "fast", groups: Any = None) -> dict[str, Any]:
+    def fake_answer_question(question: str, department: str | None = None, mode: str = "fast", groups: Any = None, history: Any = None) -> dict[str, Any]:
         captured.update({"question": question, "department": department, "mode": mode})
         return {"answer": "ok", "sources": [], "department_routed": "hr"}
 
@@ -32,7 +32,7 @@ def test_ask_defaults_to_fast_mode(monkeypatch: Any) -> None:
 def test_ask_accepts_deep_mode(monkeypatch: Any) -> None:
     captured: dict[str, Any] = {}
 
-    def fake_answer_question(question: str, department: str | None = None, mode: str = "fast", groups: Any = None) -> dict[str, Any]:
+    def fake_answer_question(question: str, department: str | None = None, mode: str = "fast", groups: Any = None, history: Any = None) -> dict[str, Any]:
         captured.update({"question": question, "department": department, "mode": mode})
         return {"answer": "ok", "sources": [], "department_routed": "finance"}
 
@@ -58,7 +58,7 @@ def test_ask_accepts_deep_mode(monkeypatch: Any) -> None:
 # ── Context exposure ─────────────────────────────────────────────────
 
 
-def _fake_with_contexts(question: str, department: str | None = None, mode: str = "fast", groups: Any = None) -> dict[str, Any]:
+def _fake_with_contexts(question: str, department: str | None = None, mode: str = "fast", groups: Any = None, history: Any = None) -> dict[str, Any]:
     return {
         "answer": "ok",
         "sources": [],
@@ -228,7 +228,7 @@ def test_groups_reach_retrieval_not_just_the_response(monkeypatch: Any) -> None:
     """
     captured: dict[str, Any] = {}
 
-    def fake(question: str, department: Any = None, mode: str = "fast", groups: Any = None) -> dict[str, Any]:
+    def fake(question: str, department: Any = None, mode: str = "fast", groups: Any = None, history: Any = None) -> dict[str, Any]:
         captured["groups"] = groups
         return {"answer": "ok", "sources": [], "department_routed": "hr", "contexts": []}
 

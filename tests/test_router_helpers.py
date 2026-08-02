@@ -218,3 +218,39 @@ def test_departments_of_infers_from_cited_sources() -> None:
     assert departments_of(["HR-001", "FIN-002"]) == "both"
     # No sources at all: nothing to claim, so stay neutral.
     assert departments_of([]) == "both"
+
+
+# ── multi-turn follow-up rewriting ────────────────────────────────────
+
+
+def test_standalone_questions_are_not_rewritten() -> None:
+    """Rewriting costs an LLM call and risks changing what was asked."""
+    from app.agents.router import needs_rewrite
+
+    history = [{"role": "user", "content": "How much PTO do I accrue?"}]
+    assert not needs_rewrite("What is the hotel budget for business travel to NYC?", history)
+
+
+def test_referential_followups_are_detected() -> None:
+    from app.agents.router import needs_rewrite
+
+    history = [{"role": "user", "content": "How much PTO do I accrue?"}]
+    for followup in ("What about for contractors?", "And for them?", "Is that per year?"):
+        assert needs_rewrite(followup, history), followup
+
+
+def test_short_followups_are_detected_even_without_a_pronoun() -> None:
+    """"What about contractors?" is four words and entirely referential."""
+    from app.agents.router import needs_rewrite
+
+    history = [{"role": "user", "content": "How much PTO do I accrue?"}]
+    assert needs_rewrite("Contractors too?", history)
+
+
+def test_no_history_means_no_rewrite() -> None:
+    """The first turn has nothing to resolve against."""
+    from app.agents.router import needs_rewrite, rewrite_followup
+
+    assert not needs_rewrite("What about it?", None)
+    assert not needs_rewrite("What about it?", [])
+    assert rewrite_followup("What about it?", None) == "What about it?"
