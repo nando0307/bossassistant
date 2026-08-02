@@ -5,7 +5,7 @@ from typing import Any
 from fastapi.testclient import TestClient
 
 from app.api import main
-from tests.conftest import auth_headers, make_token
+from tests.helpers import auth_headers, make_token
 
 
 # ── Mode handling ────────────────────────────────────────────────────
