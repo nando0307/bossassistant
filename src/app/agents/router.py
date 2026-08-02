@@ -10,6 +10,9 @@ from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import ChatPromptTemplate
 from pydantic import BaseModel, Field
 
+from app.cache import get_cache
+from app.config import settings
+from app.cache import normalize as cache_normalize
 from app.observability import langchain_config
 from app.retrieval.rag import (
     Department,
@@ -19,6 +22,7 @@ from app.retrieval.rag import (
     format_contexts,
     format_sources,
     get_llm,
+    get_embedder,
     is_abstention_message,
     stream_department,
 )
@@ -385,6 +389,41 @@ def departments_of(sources: list[str]) -> Literal["hr", "finance", "both"]:
 
 
 def answer_question(
+    question: str,
+    department: Department | None = None,
+    mode: RetrievalMode = "fast",
+    groups: frozenset[str] | None = None,
+    use_cache: bool = True,
+) -> AskResult:
+    """Answer a question, consulting the ACL-partitioned semantic cache first.
+
+    A cache hit skips retrieval entirely, which is exactly why the cache is
+    partitioned by the caller's groups: serving a cached answer to a caller who
+    could not have retrieved its sources is the same disclosure as skipping the
+    ACL filter, just harder to spot.
+
+    The department and mode are folded into the cache partition too — the same
+    question answered in graph mode or forced to Finance is a different answer.
+    """
+    cache = get_cache()
+    use_cache = use_cache and settings.enable_semantic_cache
+    cache_scope: frozenset[str] | None = (
+        None if groups is None else frozenset({*groups, f"\x00mode={mode}", f"\x00dept={department}"})
+    )
+    embedding = None
+    if use_cache:
+        embedding = cache_normalize(get_embedder().embed_query(question))
+        cached = cache.get(embedding, cache_scope)
+        if cached is not None:
+            return cast(AskResult, cached)
+
+    result = _answer_question_uncached(question, department, mode, groups)
+    if use_cache and embedding is not None:
+        cache.put(embedding, cache_scope, question, cast(dict[str, Any], result))
+    return result
+
+
+def _answer_question_uncached(
     question: str,
     department: Department | None = None,
     mode: RetrievalMode = "fast",

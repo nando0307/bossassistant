@@ -610,6 +610,64 @@ Two conclusions, neither of which was the assumption going in:
    latency — the opposite of the usual advice. Retrieval is 43-100% of the wall clock in
    the table above.
 
+## Semantic cache and cost accounting
+
+### Cache, partitioned by access
+
+A semantic cache keyed on the question alone is a **data-leak bug** in any system with
+per-user authorization. A cache hit skips retrieval, and therefore skips the ACL filter:
+an executive asks about M&A thresholds, the answer is built from `executives`-only
+documents, and the next employee to ask a similar question is served it directly. Nothing
+in the request path would notice.
+
+So entries live in per-group-set partitions rather than being filtered after lookup —
+filtering after lookup still requires the leaky entry to be found, compared, and rejected
+correctly every single time; partitioning makes it unreachable. The department and mode
+are folded into the partition too, since the same question in graph mode is a different
+answer.
+
+Measured live:
+
+| call | time | result |
+|---|---|---|
+| cold, `all-employees` | 5.32s | miss |
+| repeat, `all-employees` | **0.68s** | hit — **8x faster**, identical answer |
+| paraphrase, `all-employees` | 4.06s | miss (below threshold) |
+| **same question, `executives`** | 7.59s | **miss — different ACL partition, no leak** |
+
+Two deliberate conservatisms, both costing hit rate:
+
+* **Threshold 0.97.** "Hotel cap in NYC" and "hotel cap internationally" sit close in
+  embedding space and have different numbers; a permissive threshold serves confident
+  nonsense. The paraphrase miss above is this working as intended, not a defect.
+* **Exact group set, no subset reasoning.** A caller holding
+  `{all-employees, finance-team}` cannot reuse an entry made for `{all-employees}` even
+  though it would be safe. The alternative is a correctness argument that must hold for
+  every group added later, and getting it wrong is silent.
+
+Ceilings, stated rather than discovered later: in-process, so hit rate falls as workers
+scale (Redis is the upgrade), and entries expire on TTL rather than on corpus change, so
+a re-ingest leaves stale answers for up to the TTL — `invalidate_all()` exists and
+`scripts/ingest.py` should call it once this is deployed anywhere real.
+
+### Cost accounting
+
+`src/app/costs.py` accumulates token usage per request across every model call — routing,
+multi-query, generation are separate calls and a per-request figure has to sum them.
+
+Two honesty constraints:
+
+* **Prices are declared, not discovered.** NVIDIA does not return a price, so the table is
+  a dated local assumption. Unknown models report **zero cost with token counts intact**:
+  an obviously-wrong $0.00 is better than a plausible number invented from a neighbouring
+  model's rate, and `unpriced_models` surfaces which.
+* **Estimated tokens are labelled.** Provider `usage_metadata` is authoritative; the
+  character-based fallback is flagged, and one estimated call taints the whole request as
+  estimated. A cost that silently mixes measured and guessed tokens is not a cost.
+
+A test asserts every model actually in use is priced, so adding a model without a rate
+fails rather than silently reporting every request as free.
+
 ## Next steps
 
 1. ~~Faithfulness is judge-bound~~ — **solved. See RAGAS below.** (Original diagnosis kept for the record:) The judge model was

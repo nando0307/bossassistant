@@ -67,6 +67,14 @@ class Settings(BaseSettings):
     jwt_audience: str = "bossassistant-api"
     require_auth: bool = True
 
+    # --- Semantic cache ---
+    #: A cache hit skips retrieval, so entries are partitioned by the caller's
+    #: groups. Off in tests, where embedding every question would mean a live
+    #: API call per assertion.
+    enable_semantic_cache: bool = True
+    semantic_cache_threshold: float = 0.97
+    semantic_cache_ttl_seconds: float = 3600.0
+
     # --- CORS ---
     cors_origins: str = Field(default="http://localhost:3000,http://localhost:5173")
 
