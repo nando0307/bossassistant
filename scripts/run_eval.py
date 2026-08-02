@@ -33,6 +33,7 @@ def ask(
     retry_delay: float,
     timeout: float,
     include_contexts: bool = False,
+    token: str | None = None,
 ) -> tuple[dict[str, Any], float, int]:
     payload = json.dumps(
         {
@@ -42,10 +43,13 @@ def ask(
             "include_contexts": include_contexts,
         }
     ).encode("utf-8")
+    headers = {"Content-Type": "application/json"}
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
     request = urllib.request.Request(
         f"{api_url.rstrip('/')}/ask",
         data=payload,
-        headers={"Content-Type": "application/json"},
+        headers=headers,
         method="POST",
     )
     started = time.perf_counter()
@@ -126,6 +130,7 @@ def evaluate_case(
     retry_delay: float,
     timeout: float,
     include_contexts: bool = False,
+    token: str | None = None,
 ) -> dict[str, Any]:
     started = time.perf_counter()
     try:
@@ -138,6 +143,7 @@ def evaluate_case(
             retry_delay,
             timeout,
             include_contexts,
+            token,
         )
         expected_sources = set(case.get("expected_sources", []))
         actual_sources = source_ids(response)
@@ -331,6 +337,13 @@ def main() -> None:
     # unmeasurable into a routine part of the run.
     parser.add_argument("--ragas-model", default="meta/llama-3.1-8b-instruct")
     parser.add_argument("--ragas-embed-model", default="nvidia/nv-embedqa-e5-v5")
+    parser.add_argument(
+        "--token",
+        default=None,
+        help="Bearer token for the ACL-filtered /ask endpoint. Baselines use a token "
+        "holding every group, so the numbers measure retrieval quality rather than "
+        "ACL selectivity; scripts/measure_acl_recall.py covers the ACL cost separately.",
+    )
     parser.add_argument("--ragas-workers", type=int, default=2)
     parser.add_argument("--ragas-timeout", type=int, default=600)
     args = parser.parse_args()
@@ -348,6 +361,7 @@ def main() -> None:
             args.retry_delay,
             args.timeout,
             include_contexts=args.ragas,
+            token=args.token,
         )
         for case in cases
     ]

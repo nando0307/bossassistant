@@ -1,0 +1,469 @@
+{
+  "created": "2026-08-02T03:31:56.233705+00:00",
+  "commit": "cd202b175076c605e3e0f36a9ecf077a948932f5",
+  "source": "evals/results_fast.jsonl",
+  "summary": {
+    "n": 75,
+    "ok": 75,
+    "passed": 64,
+    "department_match": 72,
+    "source_hit": 68,
+    "quality_match": 67,
+    "source_recall": 0.9085,
+    "p50_latency": 2.79,
+    "p95_latency": 13.644,
+    "ragas": {}
+  },
+  "cases": {
+    "hr_pto_accrual": {
+      "passed": true,
+      "department_match": true,
+      "source_hit": true,
+      "quality_match": true
+    },
+    "hr_parental_leave": {
+      "passed": true,
+      "department_match": true,
+      "source_hit": true,
+      "quality_match": true
+    },
+    "finance_travel_hotel_nyc": {
+      "passed": true,
+      "department_match": true,
+      "source_hit": true,
+      "quality_match": true
+    },
+    "finance_international_per_diem": {
+      "passed": false,
+      "department_match": true,
+      "source_hit": false,
+      "quality_match": true
+    },
+    "both_wellness_therapy": {
+      "passed": true,
+      "department_match": true,
+      "source_hit": true,
+      "quality_match": true
+    },
+    "both_pto_and_hotel": {
+      "passed": true,
+      "department_match": true,
+      "source_hit": true,
+      "quality_match": true
+    },
+    "vague_how_much": {
+      "passed": true,
+      "department_match": true,
+      "source_hit": true,
+      "quality_match": true
+    },
+    "multi_question_bundle": {
+      "passed": true,
+      "department_match": true,
+      "source_hit": true,
+      "quality_match": true
+    },
+    "hr_pto_carryover": {
+      "passed": true,
+      "department_match": true,
+      "source_hit": true,
+      "quality_match": true
+    },
+    "hr_pto_monthly_rate": {
+      "passed": true,
+      "department_match": true,
+      "source_hit": true,
+      "quality_match": true
+    },
+    "hr_pto_request_notice": {
+      "passed": true,
+      "department_match": true,
+      "source_hit": true,
+      "quality_match": true
+    },
+    "hr_parental_birthing": {
+      "passed": true,
+      "department_match": true,
+      "source_hit": true,
+      "quality_match": true
+    },
+    "hr_parental_notice": {
+      "passed": true,
+      "department_match": true,
+      "source_hit": true,
+      "quality_match": true
+    },
+    "hr_remote_days_per_week": {
+      "passed": true,
+      "department_match": true,
+      "source_hit": true,
+      "quality_match": true
+    },
+    "hr_remote_stipend": {
+      "passed": true,
+      "department_match": true,
+      "source_hit": true,
+      "quality_match": true
+    },
+    "hr_remote_core_hours": {
+      "passed": true,
+      "department_match": true,
+      "source_hit": true,
+      "quality_match": true
+    },
+    "hr_remote_full_approval": {
+      "passed": true,
+      "department_match": true,
+      "source_hit": true,
+      "quality_match": true
+    },
+    "hr_review_cadence": {
+      "passed": true,
+      "department_match": true,
+      "source_hit": true,
+      "quality_match": true
+    },
+    "hr_review_top_rating": {
+      "passed": true,
+      "department_match": true,
+      "source_hit": true,
+      "quality_match": true
+    },
+    "hr_review_pip": {
+      "passed": true,
+      "department_match": true,
+      "source_hit": true,
+      "quality_match": true
+    },
+    "hr_review_self_assessment": {
+      "passed": true,
+      "department_match": true,
+      "source_hit": true,
+      "quality_match": true
+    },
+    "hr_onboarding_length": {
+      "passed": true,
+      "department_match": true,
+      "source_hit": true,
+      "quality_match": true
+    },
+    "hr_onboarding_benefits_deadline": {
+      "passed": true,
+      "department_match": true,
+      "source_hit": true,
+      "quality_match": true
+    },
+    "hr_onboarding_week_two": {
+      "passed": true,
+      "department_match": true,
+      "source_hit": true,
+      "quality_match": true
+    },
+    "hr_onboarding_buddy": {
+      "passed": true,
+      "department_match": true,
+      "source_hit": true,
+      "quality_match": true
+    },
+    "hr_ethics_hotline": {
+      "passed": true,
+      "department_match": true,
+      "source_hit": true,
+      "quality_match": true
+    },
+    "hr_report_investigation_window": {
+      "passed": true,
+      "department_match": true,
+      "source_hit": true,
+      "quality_match": true
+    },
+    "hr_retaliation_consequence": {
+      "passed": true,
+      "department_match": true,
+      "source_hit": true,
+      "quality_match": true
+    },
+    "hr_training_deadline": {
+      "passed": true,
+      "department_match": true,
+      "source_hit": true,
+      "quality_match": true
+    },
+    "hr_ld_allowance": {
+      "passed": true,
+      "department_match": true,
+      "source_hit": true,
+      "quality_match": true
+    },
+    "hr_ld_budget_wording": {
+      "passed": false,
+      "department_match": false,
+      "source_hit": false,
+      "quality_match": false
+    },
+    "hr_tuition_reimbursement": {
+      "passed": false,
+      "department_match": false,
+      "source_hit": false,
+      "quality_match": false
+    },
+    "hr_tuition_clawback": {
+      "passed": false,
+      "department_match": true,
+      "source_hit": true,
+      "quality_match": false
+    },
+    "hr_medical_plan_tiers": {
+      "passed": true,
+      "department_match": true,
+      "source_hit": true,
+      "quality_match": true
+    },
+    "hr_hdhp_premium_share": {
+      "passed": true,
+      "department_match": true,
+      "source_hit": true,
+      "quality_match": true
+    },
+    "hr_dental_vision_cost": {
+      "passed": true,
+      "department_match": true,
+      "source_hit": true,
+      "quality_match": true
+    },
+    "hr_gym_reimbursement": {
+      "passed": true,
+      "department_match": true,
+      "source_hit": true,
+      "quality_match": true
+    },
+    "hr_wellness_stipend": {
+      "passed": true,
+      "department_match": true,
+      "source_hit": true,
+      "quality_match": true
+    },
+    "fin_receipt_threshold": {
+      "passed": true,
+      "department_match": true,
+      "source_hit": true,
+      "quality_match": true
+    },
+    "fin_expense_deadline": {
+      "passed": false,
+      "department_match": true,
+      "source_hit": true,
+      "quality_match": false
+    },
+    "fin_domestic_meal_per_diem": {
+      "passed": false,
+      "department_match": true,
+      "source_hit": false,
+      "quality_match": true
+    },
+    "fin_alcohol_expense": {
+      "passed": true,
+      "department_match": true,
+      "source_hit": true,
+      "quality_match": true
+    },
+    "fin_personal_charge_repayment": {
+      "passed": true,
+      "department_match": true,
+      "source_hit": true,
+      "quality_match": true
+    },
+    "fin_flight_class_long_haul": {
+      "passed": true,
+      "department_match": true,
+      "source_hit": true,
+      "quality_match": true
+    },
+    "fin_hotel_standard_city": {
+      "passed": true,
+      "department_match": true,
+      "source_hit": true,
+      "quality_match": true
+    },
+    "fin_hotel_international": {
+      "passed": true,
+      "department_match": true,
+      "source_hit": true,
+      "quality_match": true
+    },
+    "fin_mileage_rate": {
+      "passed": true,
+      "department_match": true,
+      "source_hit": true,
+      "quality_match": true
+    },
+    "fin_rental_car_class": {
+      "passed": true,
+      "department_match": true,
+      "source_hit": true,
+      "quality_match": true
+    },
+    "fin_budget_cycle_start": {
+      "passed": true,
+      "department_match": true,
+      "source_hit": true,
+      "quality_match": true
+    },
+    "fin_budget_overage_approval": {
+      "passed": true,
+      "department_match": true,
+      "source_hit": true,
+      "quality_match": true
+    },
+    "fin_capex_board_approval": {
+      "passed": true,
+      "department_match": true,
+      "source_hit": true,
+      "quality_match": true
+    },
+    "fin_payment_terms": {
+      "passed": true,
+      "department_match": true,
+      "source_hit": true,
+      "quality_match": true
+    },
+    "fin_invoice_dual_approval": {
+      "passed": true,
+      "department_match": true,
+      "source_hit": true,
+      "quality_match": true
+    },
+    "fin_international_vendor_setup": {
+      "passed": true,
+      "department_match": true,
+      "source_hit": true,
+      "quality_match": true
+    },
+    "fin_revenue_standard": {
+      "passed": true,
+      "department_match": true,
+      "source_hit": true,
+      "quality_match": true
+    },
+    "fin_subscription_revenue": {
+      "passed": true,
+      "department_match": true,
+      "source_hit": true,
+      "quality_match": true
+    },
+    "fin_setup_fee_deferral": {
+      "passed": true,
+      "department_match": true,
+      "source_hit": true,
+      "quality_match": true
+    },
+    "fin_card_reconciliation_due": {
+      "passed": false,
+      "department_match": true,
+      "source_hit": true,
+      "quality_match": false
+    },
+    "fin_card_suspension": {
+      "passed": true,
+      "department_match": true,
+      "source_hit": true,
+      "quality_match": true
+    },
+    "fin_card_cash_advance": {
+      "passed": true,
+      "department_match": true,
+      "source_hit": true,
+      "quality_match": true
+    },
+    "fin_close_preliminary_pl": {
+      "passed": true,
+      "department_match": true,
+      "source_hit": true,
+      "quality_match": true
+    },
+    "fin_external_auditor": {
+      "passed": false,
+      "department_match": true,
+      "source_hit": false,
+      "quality_match": false
+    },
+    "fin_fiscal_year_end": {
+      "passed": true,
+      "department_match": true,
+      "source_hit": true,
+      "quality_match": true
+    },
+    "fin_10k_filing": {
+      "passed": true,
+      "department_match": true,
+      "source_hit": true,
+      "quality_match": true
+    },
+    "fin_po_threshold": {
+      "passed": true,
+      "department_match": true,
+      "source_hit": true,
+      "quality_match": true
+    },
+    "fin_po_vp_range": {
+      "passed": true,
+      "department_match": true,
+      "source_hit": true,
+      "quality_match": true
+    },
+    "fin_sole_source_justification": {
+      "passed": true,
+      "department_match": true,
+      "source_hit": true,
+      "quality_match": true
+    },
+    "both_conference_travel_approval": {
+      "passed": false,
+      "department_match": false,
+      "source_hit": false,
+      "quality_match": false
+    },
+    "both_new_hire_first_trip": {
+      "passed": false,
+      "department_match": true,
+      "source_hit": false,
+      "quality_match": true
+    },
+    "both_home_office_stipend_claim": {
+      "passed": false,
+      "department_match": true,
+      "source_hit": true,
+      "quality_match": false
+    },
+    "oos_stock_options": {
+      "passed": true,
+      "department_match": true,
+      "source_hit": true,
+      "quality_match": true
+    },
+    "oos_severance": {
+      "passed": true,
+      "department_match": true,
+      "source_hit": true,
+      "quality_match": true
+    },
+    "adversarial_pto_inflation": {
+      "passed": true,
+      "department_match": true,
+      "source_hit": true,
+      "quality_match": true
+    },
+    "adversarial_hotel_inflation": {
+      "passed": true,
+      "department_match": true,
+      "source_hit": true,
+      "quality_match": true
+    },
+    "vague_deadline": {
+      "passed": true,
+      "department_match": true,
+      "source_hit": true,
+      "quality_match": true
+    }
+  }
+}

@@ -1,0 +1,126 @@
+name: Nightly eval
+
+# Nightly, not per-PR, and deliberately so. A full scored run is ~90 live LLM
+# calls for the suite plus a RAGAS judge pass per case; blocking every push on
+# that would cost hours of wall time and real money to re-measure a corpus that
+# has not changed. The regression signal is a property of the model and the
+# provider, which drift on their own schedule, not of any single commit.
+on:
+  schedule:
+    - cron: "0 7 * * *" # 07:00 UTC daily
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "Retrieval mode to evaluate"
+        type: choice
+        options: [fast, graph]
+        default: fast
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  eval:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      NEO4J_URI: ${{ secrets.NEO4J_URI }}
+      NEO4J_USER: ${{ secrets.NEO4J_USER }}
+      NEO4J_PASSWORD: ${{ secrets.NEO4J_PASSWORD }}
+      NEO4J_DATABASE: ${{ secrets.NEO4J_DATABASE }}
+      NVIDIA_API_KEY: ${{ secrets.NVIDIA_API_KEY }}
+      NVIDIA_CHAT_MODEL: ${{ vars.NVIDIA_CHAT_MODEL }}
+      NVIDIA_DEEP_CHAT_MODEL: ${{ vars.NVIDIA_DEEP_CHAT_MODEL }}
+      JWT_SECRET: ${{ secrets.JWT_SECRET }}
+      REQUIRE_AUTH: "true"
+      MODE: ${{ inputs.mode || 'fast' }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - run: uv sync --all-extras --dev
+
+      - name: Start API
+        run: |
+          uv run uvicorn app.api.main:app --host 127.0.0.1 --port 8000 &
+          for _ in $(seq 1 30); do
+            curl -sf http://127.0.0.1:8000/health && break
+            sleep 2
+          done
+          curl -sf http://127.0.0.1:8000/health || { echo "API failed to start"; exit 1; }
+
+      - name: Mint an all-groups token
+        id: token
+        run: |
+          # Baselines measure retrieval quality, so the token holds every group.
+          # ACL selectivity is measured separately by scripts/measure_acl_recall.py.
+          TOKEN=$(uv run python scripts/mint_token.py \
+            --groups all-employees managers hr-team finance-team executives \
+            --ttl 90 2>/dev/null | tail -1)
+          echo "::add-mask::$TOKEN"
+          echo "token=$TOKEN" >> "$GITHUB_OUTPUT"
+
+      - name: Run eval suite
+        run: |
+          uv run python scripts/run_eval.py \
+            --api-url http://127.0.0.1:8000 \
+            --token "${{ steps.token.outputs.token }}" \
+            --mode "$MODE" \
+            --timeout 180 --retries 3 --retry-delay 5 \
+            --ragas \
+            --output evals/nightly_${MODE}.jsonl
+
+      - name: Compare against baseline
+        id: gate
+        run: |
+          uv run python scripts/eval_gate.py check \
+            "evals/nightly_${MODE}.jsonl" \
+            --baseline "evals/baseline_${MODE}.json" \
+            --markdown gate-report.md
+        continue-on-error: true
+
+      - name: Publish report
+        if: always()
+        run: |
+          {
+            echo "## Nightly eval — \`$MODE\` mode"
+            echo
+            cat gate-report.md 2>/dev/null || echo "No report produced; the run failed before the gate."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: eval-results-${{ env.MODE }}
+          path: |
+            evals/nightly_*.jsonl
+            gate-report.md
+          retention-days: 30
+
+      # A nightly run has no PR to comment on, so a confirmed regression opens an
+      # issue instead. Only fires when the gate's paired McNemar test clears the
+      # noise floor — a gate that files a ticket for ordinary provider flake gets
+      # muted within a week, which is the real failure mode.
+      - name: Open an issue on a confirmed regression
+        if: steps.gate.outcome == 'failure'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const body = fs.readFileSync('gate-report.md', 'utf8');
+            await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: `Nightly eval regression (${process.env.MODE} mode) — ${new Date().toISOString().slice(0, 10)}`,
+              body: `A regression cleared the statistical noise floor.\n\n${body}\n\n_Run: ${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}_`,
+              labels: ['eval-regression'],
+            });
+
+      - name: Fail the run if the gate failed
+        if: steps.gate.outcome == 'failure'
+        run: exit 1

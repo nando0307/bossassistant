@@ -250,30 +250,37 @@ context they actually gave the model.
 
 ### Measured: same 15 multi-hop cases, vector vs graph
 
+**Re-measured after the source-attribution fix. The earlier recall figure was wrong and
+the correction reverses that claim.**
+
 | Metric | Vector | Graph |
 |---|---|---|
-| **Faithfulness** | 0.648 (n=12/15) | **0.854 (n=12/15)** |
-| **Answer relevancy** | 0.623 (n=14/15) | **0.903 (n=15/15)** |
-| Answer quality (term checks) | 3/15 | **10/15** |
-| Source recall | 0.555 | **0.826** |
-| Fully passed | 1/15 | **4/15** |
+| Answer quality (term checks) | 3/15 | **7/15** |
+| Source recall | **0.546** | **0.435** |
+| Source hits (strict superset) | 2/15 | 2/15 |
+| Fully passed | 1/15 | 1/15 |
+| p50 latency | 5.33s | 7.37s |
 
-Same questions, same judge, same corpus — the only variable is the retriever. This is
-the attributable before/after the plan set out to produce.
+What survives: **graph mode answers roughly twice as many multi-hop questions correctly**
+(3/15 -> 7/15). Its advantage is assembling an answer whose evidence spans more documents
+than a top-k window holds.
 
-> **Source-recall figures for graph mode are not trustworthy as measured.** Local
-> search credited every document mentioning any one of its 32 matched entities,
-> citing a median of 27 of 75 policies per answer — 29 documents, 11 of them
-> Finance, for "how much PTO do I accrue". At that breadth, hitting the expected
-> source is nearly free, so recall is inflated and `department_routed` collapsed
-> to "both". Attribution now requires 3+ entity hits per document (the same guard
-> global search already had); the same question now cites HR-001 and HR-009 and
-> routes "hr". The faithfulness and answer-quality numbers are unaffected — they
-> never depended on the citation set — but recall must be re-measured.
+What does not survive: the claim that graph mode improves *source recall*. It was
+reported as 0.553 -> 0.826, and that number was an artifact of the dragnet described
+above — local search credited every document mentioning any one of its 32 matched
+entities, citing a median of 27 of 75 policies per answer, which makes hitting the
+expected source nearly free. With attribution requiring 3+ entity hits, graph recall is
+**0.435, below vector's 0.546**. Graph mode finds the right answer while citing fewer of
+the documents the case expects.
 
-Full 75-case factoid suite in fast mode, for reference: faithfulness 0.762 (n=70/73),
-relevancy 0.677 (n=73/73), 65/75 passed, p50 2.96s. Not comparable to the table above,
-which uses a different and much harder question set.
+That is a worse result than previously reported and it is the correct one. The retrieval
+claim to make is about answer completeness on multi-document questions, not about recall.
+
+RAGAS scores are absent from this re-baseline: the judge was throttling badly (30+ minutes
+on a single 75-case scoring pass versus ~7 minutes when first measured), so baselines were
+frozen without it. The gate does not use RAGAS — it gates on per-case booleans and reports
+RAGAS only as context — so this blocks nothing, but the 0.648 -> 0.854 faithfulness figure
+predates the attribution fix and should be re-run before it is quoted.
 
 ## ACL-aware retrieval
 
@@ -410,6 +417,55 @@ into chunks. This needs real source documents rather than better code — genera
 from this same text would test nothing. Public HR/finance policy PDFs or SEC filings are
 the realistic input.
 
+## The CI eval gate
+
+Nightly, not per-PR: a scored run is ~90 live LLM calls plus a judge pass per case, and
+the regression signal is a property of the model and the provider — which drift on their
+own schedule, not per commit. `.github/workflows/nightly-eval.yml` runs the suite, diffs
+against a frozen baseline, writes a job summary, uploads results, and opens an issue
+(labelled `eval-regression`) only when the gate actually fails.
+
+**Why the gate is not "fail if the pass rate drops 5%".** At n=75 a single case is 1.3
+points, so a 5-point threshold fires on 4 cases flipping — well inside noise this project
+has already measured: provider 503s alone cost 0, 3, and 5 cases on otherwise identical
+runs. An arbitrary threshold at this sample size produces a gate that cries wolf until
+someone switches it off, which is worse than no gate at all.
+
+**The runs are paired**, and that is the part most implementations discard. Every case is
+the same question against the same corpus, so the information lives in the cases that
+*changed verdict*, not in the aggregate rate. The gate uses an exact one-sided **McNemar**
+test on discordant pairs, and reports a **Newcombe hybrid-score interval** on the
+difference for effect size.
+
+The re-baseline produced a clean demonstration of why that matters. Comparing graph mode
+against the fast-mode baseline:
+
+| metric | baseline | current | change | 95% CI | discordant | McNemar p | |
+|---|---|---|---|---|---|---|---|
+| passed | 64/75 | 18/75 | -61.3% | [-71.7%, -46.8%] | 47↓ 1↑ | 0.000 | **REGRESSION** |
+| department_match | 72/75 | 30/75 | -56.0% | [-66.7%, -42.6%] | 43↓ 1↑ | 0.000 | **REGRESSION** |
+| source_hit | 68/75 | 51/75 | -22.7% | [-34.8%, -9.8%] | 17↓ 0↑ | 0.000 | **REGRESSION** |
+| quality_match | 67/75 | 67/75 | +0.0% | [-10.4%, +10.4%] | **7↓ 7↑** | 0.605 | not flagged |
+
+`quality_match` is the case that makes the argument: **identical aggregate rate, 14 cases
+changed verdict, correctly not flagged.** A two-proportion test sees 67/75 both times and
+cannot distinguish that from nothing happening — and equally, it would miss 10 cases
+regressing if 10 others improved. Pairing separates them.
+
+Continuous metrics (latency percentiles, RAGAS means) are reported but deliberately **not
+gated**: with this sample size and a provider that throttles unpredictably, any threshold
+tight enough to catch real drift would fire constantly on noise. Reporting a number you
+refuse to gate on is more honest than gating on one you do not trust.
+
+Frozen baselines live at `evals/baseline_fast.json` and `evals/baseline_graph.json`, and
+carry per-case verdicts — without them the comparison cannot be paired, and an unpaired
+comparison at this n cannot detect much of anything.
+
+**Not done: the production feedback loop.** Capturing thumbs-down plus trace ID from real
+traffic, triaging weekly, and promoting genuine failures into `evals/` is what separates
+an eval *suite* from an eval *process*. It needs a `/feedback` endpoint and a frontend
+control, neither of which exists yet.
+
 ## Next steps
 
 1. ~~Faithfulness is judge-bound~~ — **solved. See RAGAS below.** (Original diagnosis kept for the record:) The judge model was
@@ -452,7 +508,7 @@ the realistic input.
 4. ~~Propagate upstream 5xx as 503~~ — **done.** `/ask` now maps provider
    `502/503/504/ResourceExhausted` to 503 so the eval client's retry path engages;
    genuine defects still surface as 500. Recovered 2 of 3 cases lost in one run.
-5. **Nightly eval job, not a CI gate.** A 75-case run takes ~5 minutes functionally;
+5. ~~Nightly eval job~~ — **done, see "The CI eval gate" above.** (Original note:) A 75-case run takes ~5 minutes functionally;
    with the judge it is far longer. Nightly writing `results.jsonl` is both practical
    and more credible than blocking PRs.
 
@@ -462,7 +518,7 @@ Now partly measured. Status of each original claim:
 
 | Claim | Status |
 |---|---|
-| RAGAS faithfulness 64→91%, relevance 68→89%, n=100 | Replaced with measured numbers: faithfulness **0.648 → 0.854**, relevancy **0.623 → 0.903**, n=15, by swapping vector retrieval for the entity graph. Not 91%, and n=15 not 100 — but real and reproducible from `evals/`. |
+| RAGAS faithfulness 64→91%, relevance 68→89%, n=100 | Faithfulness 0.648 → 0.854 and relevancy 0.623 → 0.903 were measured at n=15, but **predate the source-attribution fix** and need re-running before use. The durable claim is answer quality on multi-hop questions: **3/15 → 7/15**. |
 | BM25 + dense + cross-encoder via RRF | Misdescribed. Hybrid fusion is Neo4j's Lucene fulltext index; RRF fuses multi-query variants. Reranker defaults off and is skipped in fast mode. |
 | JWT role-scoped retrieval (HR/Finance/Admin) | **Now real**, and more interesting than the original claim: 5 groups that cut across department, filtered at retrieval rather than post-hoc, with the post-ANN recall cost measured (`evals/acl_recall.json`). |
 | FastAPI streaming | No streaming endpoint. |
@@ -473,10 +529,11 @@ Now partly measured. Status of each original claim:
 
 What is defensible today:
 
-*"Built a GraphRAG layer over a 75-document policy corpus (Neo4j entity graph, hierarchical
+*"Built a GraphRAG layer over a 77-document policy corpus (Neo4j entity graph, hierarchical
 community detection, local/global search). On 15 multi-hop questions whose answers span
-4-19 documents, RAGAS faithfulness improved 0.65 → 0.85 and answer relevancy 0.62 → 0.90
-against the same corpus and judge."*
+4-19 documents, it answered 7/15 correctly against vector retrieval's 3/15 — while
+measuring that it does **not** improve source recall (0.435 vs 0.546), because the first
+version's apparent recall gain came from citing a third of the corpus per answer."*
 
 *"Grew the eval suite from 8 to 90 cases; it immediately exposed two router defects that
 were refusing 25% of answerable questions."*
