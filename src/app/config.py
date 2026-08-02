@@ -67,6 +67,13 @@ class Settings(BaseSettings):
     jwt_audience: str = "bossassistant-api"
     require_auth: bool = True
 
+    #: Mints tokens for named demo personas with NO credential check. It exists
+    #: so the hosted demo can show ACL-scoped retrieval; it is an authentication
+    #: bypass by construction and defaults off. Never enable it anywhere holding
+    #: real policy.
+    enable_demo_auth: bool = False
+    demo_token_ttl_minutes: int = 30
+
     # --- Semantic cache ---
     #: A cache hit skips retrieval, so entries are partitioned by the caller's
     #: groups. Off in tests, where embedding every question would mean a live

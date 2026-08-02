@@ -9,6 +9,7 @@ restricted chunks are never fetched in the first place.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
 
 import jwt
 from fastapi import Depends, HTTPException, status
@@ -39,6 +40,54 @@ class Principal:
         if not acl_groups:
             return False
         return bool(self.groups.intersection(acl_groups))
+
+
+#: Demo identities. Each maps to a real group set, so switching persona in the
+#: UI changes what retrieval is allowed to see — which is the point of the demo.
+DEMO_PERSONAS: dict[str, frozenset[str]] = {
+    "employee": frozenset({"all-employees"}),
+    "manager": frozenset({"all-employees", "managers"}),
+    "hr-partner": frozenset({"all-employees", "managers", "hr-team"}),
+    "finance-analyst": frozenset({"all-employees", "finance-team"}),
+    "executive": frozenset({"all-employees", "executives", "finance-team"}),
+}
+
+
+def issue_demo_token(persona: str) -> tuple[str, frozenset[str], int]:
+    """Mint a short-lived token for a demo persona.
+
+    Deliberately not a login: there is no credential to check. Guarded by
+    `enable_demo_auth`, which is off unless someone turns it on for a demo
+    deployment holding synthetic policy.
+    """
+    if not settings.enable_demo_auth:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="demo auth is not enabled"
+        )
+    if settings.jwt_secret is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="server has no JWT secret configured",
+        )
+    groups = DEMO_PERSONAS.get(persona)
+    if groups is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"unknown persona; choose one of {sorted(DEMO_PERSONAS)}",
+        )
+    ttl = settings.demo_token_ttl_minutes
+    token = jwt.encode(
+        {
+            "sub": f"demo:{persona}",
+            "groups": sorted(groups),
+            "iss": settings.jwt_issuer,
+            "aud": settings.jwt_audience,
+            "exp": datetime.now(timezone.utc) + timedelta(minutes=ttl),
+        },
+        settings.jwt_secret.get_secret_value(),
+        algorithm=settings.jwt_algorithm,
+    )
+    return token, groups, ttl * 60
 
 
 def _unauthorized(detail: str) -> HTTPException:

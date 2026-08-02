@@ -240,3 +240,53 @@ def test_groups_reach_retrieval_not_just_the_response(monkeypatch: Any) -> None:
     )
     assert response.status_code == 200
     assert captured["groups"] == frozenset({"finance-team", "all-employees"})
+
+
+# ── Demo auth ────────────────────────────────────────────────────────
+
+
+def test_demo_auth_is_disabled_by_default() -> None:
+    """It mints tokens with no credential check, so off is the only safe default."""
+    from app.config import settings
+
+    assert settings.enable_demo_auth is False
+    client = TestClient(main.app)
+    assert client.post("/auth/demo", json={"persona": "executive"}).status_code == 404
+    assert client.get("/auth/personas").status_code == 404
+
+
+def test_demo_token_grants_exactly_the_persona_groups(monkeypatch: Any) -> None:
+    from app.config import settings
+
+    monkeypatch.setattr(settings, "enable_demo_auth", True)
+    response = TestClient(main.app).post("/auth/demo", json={"persona": "executive"})
+    assert response.status_code == 200
+    body = response.json()
+    assert body["groups"] == ["all-employees", "executives", "finance-team"]
+    assert body["expires_in"] > 0
+
+    # And the token it issues must actually authenticate.
+    from app.auth import decode_token
+
+    principal = decode_token(body["token"])
+    assert principal.groups == frozenset(body["groups"])
+    assert principal.subject == "demo:executive"
+
+
+def test_demo_personas_differ_in_access(monkeypatch: Any) -> None:
+    """The demo is only interesting if personas really see different things."""
+    from app.config import settings
+
+    monkeypatch.setattr(settings, "enable_demo_auth", True)
+    client = TestClient(main.app)
+    employee = client.post("/auth/demo", json={"persona": "employee"}).json()["groups"]
+    executive = client.post("/auth/demo", json={"persona": "executive"}).json()["groups"]
+    assert "executives" in executive and "executives" not in employee
+
+
+def test_unknown_persona_is_rejected(monkeypatch: Any) -> None:
+    from app.config import settings
+
+    monkeypatch.setattr(settings, "enable_demo_auth", True)
+    response = TestClient(main.app).post("/auth/demo", json={"persona": "ceo-of-everything"})
+    assert response.status_code == 400

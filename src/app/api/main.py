@@ -22,7 +22,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
 from app.agents.router import answer_question, stream_question
-from app.auth import Principal, get_principal
+from app.auth import DEMO_PERSONAS, Principal, get_principal, issue_demo_token
 from app.config import settings
 from app.db import verify_connectivity
 from app.retrieval.rag import RetrievalMode  # single definition; a local copy silently drifted
@@ -99,6 +99,39 @@ def ready(response: Response) -> dict[str, str]:
 #: those as 500 told every client the request was malformed and defeated retry
 #: logic, costing whole eval runs.
 _UPSTREAM_RETRYABLE = ("[502]", "[503]", "[504]", "ResourceExhausted", "Too Many Requests")
+
+
+class DemoTokenRequest(BaseModel):
+    persona: str = "employee"
+
+
+class DemoTokenResponse(BaseModel):
+    token: str
+    persona: str
+    groups: list[str]
+    expires_in: int
+
+
+@app.get("/auth/personas")
+def personas() -> dict[str, object]:
+    """List the demo identities, so the UI does not hardcode them."""
+    if not settings.enable_demo_auth:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="demo auth is not enabled")
+    return {"personas": [{"id": k, "groups": sorted(v)} for k, v in DEMO_PERSONAS.items()]}
+
+
+@app.post("/auth/demo", response_model=DemoTokenResponse)
+def demo_token(request: DemoTokenRequest) -> DemoTokenResponse:
+    """Issue a short-lived token for a demo persona.
+
+    There is no credential check — this is an authentication bypass whose only
+    purpose is letting a hosted demo show ACL-scoped retrieval. It 404s unless
+    `ENABLE_DEMO_AUTH` is explicitly set.
+    """
+    token, groups, expires_in = issue_demo_token(request.persona)
+    return DemoTokenResponse(
+        token=token, persona=request.persona, groups=sorted(groups), expires_in=expires_in
+    )
 
 
 def _sse(event: str, data: object) -> str:

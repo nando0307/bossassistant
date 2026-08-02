@@ -4,24 +4,26 @@
 
 Department-scoped RAG assistant for HR and Finance policy questions.
 
-BossAssistant started as a Colab prototype and is now a deployed full-stack app:
+BossAssistant started as a Colab prototype and is now a deployed full-stack app over a
+77-document policy corpus:
 
-- FastAPI backend on Railway
-- React/Vite frontend on Vercel
-- Neo4j AuraDB for hybrid vector + keyword retrieval
-- NVIDIA AI Endpoints for LLM generation and embeddings
-- Multi-query retrieval with Reciprocal Rank Fusion
-- Optional cross-encoder reranking
-- Structured routing across HR, Finance, or both departments
-- Multi-question splitting for bundled prompts
-- Optional Langfuse tracing for LLM observability
+- FastAPI backend on Railway, React/Vite frontend on Vercel
+- **JWT-scoped retrieval** — the caller's groups filter chunks *during* retrieval
+- Neo4j AuraDB hybrid vector + keyword retrieval, plus a **GraphRAG entity graph**
+- Incremental ingestion with content hashing, deletes, and policy supersession
+- Indirect prompt-injection defence and measured abstention
+- SSE streaming, an ACL-partitioned semantic cache, per-request cost accounting
+- A 90-case eval suite with a statistical (paired McNemar) regression gate
 
 ## What This Demonstrates
 
-- Porting a notebook RAG prototype into a packaged, deployed FastAPI service
-- Hybrid retrieval over department-scoped Neo4j indexes
-- Routing logic for HR-only, Finance-only, and cross-department questions
-- Production latency tradeoffs with configurable retrieval depth
+- Access-controlled retrieval, with the recall cost of post-ANN filtering measured
+  rather than assumed
+- Two retrieval strategies behind one interface, compared on the same eval suite
+- Ingestion that survives a changing corpus: idempotent re-runs, real deletes,
+  superseded policies dropped at query time
+- An eval *process* — frozen baselines, a nightly gate that only fails on changes
+  clearing the noise floor
 - Full-stack deployment with Railway, Vercel, Docker, and GitHub Actions CI
 
 For a recruiter-facing project summary, see [docs/portfolio.md](docs/portfolio.md).
@@ -45,6 +47,21 @@ curl https://bossassistant-production.up.railway.app/health
 curl https://bossassistant-production.up.railway.app/ready
 ```
 
+### Demo personas (when `ENABLE_DEMO_AUTH=true`)
+
+```bash
+curl -s $API/auth/personas
+curl -s -X POST $API/auth/demo -H 'Content-Type: application/json' \
+  -d '{"persona":"executive"}'
+```
+
+Retrieval is ACL-filtered, so the same question answers differently per persona:
+
+| persona | "What approvals are required for an acquisition?" |
+|---|---|
+| `employee` | *"Not covered in policy. I checked FIN-008, FIN-013, FIN-014, FIN-033."* |
+| `executive` | *"Board approval is required for any acquisition or divestiture…"* (cites FIN-037) |
+
 ### Ask
 
 ```bash
@@ -53,15 +70,34 @@ curl -s https://bossassistant-production.up.railway.app/ask \
   -d '{"question":"How much PTO do I accrue per year?","department":"hr"}'
 ```
 
+All `/ask` requests require a bearer token — the caller's `groups` claim filters
+retrieval, so an unauthenticated request is a 401 rather than an unscoped answer.
+
 Request body:
 
 ```json
 {
   "question": "How much PTO do I accrue per year?",
   "department": "hr",
-  "mode": "fast"
+  "mode": "fast",
+  "history": [{"role": "user", "content": "..."}]
 }
 ```
+
+`mode` is `"fast"`, `"deep"`, or `"graph"` (entity-graph retrieval). `history` is
+optional and used only to resolve references in a follow-up such as "what about
+internationally?".
+
+### Ask, streamed
+
+```bash
+curl -N -X POST $API/ask/stream -H 'Content-Type: application/json' \
+  -H "Authorization: Bearer $TOKEN" -d '{"question":"How much PTO do I accrue?"}'
+```
+
+Server-Sent Events: `meta`, then `sources_formatted`, then `token` events, then `done`.
+Sources arrive before the first token. Failures arrive as an `error` event with a
+`retryable` flag, since the 200 is already sent by the time generation can fail.
 
 `department` may be `"hr"`, `"finance"`, or `null` for automatic routing.
 
@@ -129,9 +165,24 @@ NEO4J_USER=
 NEO4J_PASSWORD=
 NEO4J_DATABASE=
 NVIDIA_API_KEY=
-NVIDIA_CHAT_MODEL=qwen/qwen3-next-80b-a3b-instruct
-NVIDIA_DEEP_CHAT_MODEL=qwen/qwen3-next-80b-a3b-instruct
+# qwen/qwen3-next-80b-a3b-instruct reached NVIDIA end-of-life and now returns 410.
+NVIDIA_CHAT_MODEL=nvidia/nemotron-3-super-120b-a12b
+NVIDIA_DEEP_CHAT_MODEL=nvidia/nemotron-3-ultra-550b-a55b
 NVIDIA_MAX_TOKENS=384
+
+# --- Auth. Retrieval is ACL-filtered, so these are not optional. ---
+# The app refuses to start with REQUIRE_AUTH=true and no JWT_SECRET rather than
+# serving restricted policy to anonymous callers.
+JWT_SECRET=
+JWT_ALGORITHM=HS256
+JWT_ISSUER=bossassistant
+JWT_AUDIENCE=bossassistant-api
+REQUIRE_AUTH=true
+# Mints tokens for demo personas with NO credential check. Off by default; only
+# enable on a deployment holding synthetic policy.
+ENABLE_DEMO_AUTH=false
+
+ENABLE_SEMANTIC_CACHE=true
 LANGSMITH_API_KEY=
 LANGSMITH_TRACING=
 LANGSMITH_PROJECT=
@@ -191,7 +242,17 @@ Routing behavior:
 
 Fast mode is the default for deployed latency. Use request-level `"mode": "deep"` for notebook-faithful multi-query retrieval experiments.
 
-`NVIDIA_CHAT_MODEL` controls fast/default answer generation, routing, and multi-query generation. `NVIDIA_DEEP_CHAT_MODEL` controls deep-mode answer generation. Kimi models can be tested here as an experiment, but Qwen is the deployed default because it stays within Railway response time limits.
+`NVIDIA_CHAT_MODEL` controls fast/default answer generation, routing, and multi-query
+generation. `NVIDIA_DEEP_CHAT_MODEL` controls deep-mode answer generation.
+
+Two measured constraints on model choice:
+
+- The configured chat model is a **reasoning** model. Its thinking trace breaks
+  LangChain's `with_structured_output`, which is why graph extraction, the GraphRAG map
+  step, and RAGAS scoring each pin a non-reasoning model instead.
+- It also emits its whole answer after thinking rather than incrementally, so
+  time-to-first-token is ~3.2s versus ~0.4s for `mistralai/mistral-nemotron`. That is
+  why SSE streaming buys little here — see `docs/portfolio.md`.
 
 When Langfuse is enabled, BossAssistant traces key LangChain runs:
 
@@ -216,6 +277,11 @@ Backend:
 - Railway builds the root Dockerfile.
 - Pushes to `main` trigger automatic redeploys.
 - `CORS_ORIGINS` must include the deployed Vercel frontend URL.
+- **`JWT_SECRET` must be set.** The app refuses to start with `REQUIRE_AUTH=true` and no
+  secret, rather than serving restricted policy to anonymous callers.
+- Set `ENABLE_DEMO_AUTH=true` only on a demo deployment. It mints tokens for named
+  personas with no credential check, which is what makes the hosted demo able to show
+  ACL-scoped retrieval — and an authentication bypass anywhere else.
 
 Frontend:
 
@@ -233,8 +299,8 @@ Production defaults to a low-latency path so the deployed app stays usable:
 
 ```env
 ENABLE_RERANKER=false
-NVIDIA_CHAT_MODEL=qwen/qwen3-next-80b-a3b-instruct
-NVIDIA_DEEP_CHAT_MODEL=qwen/qwen3-next-80b-a3b-instruct
+NVIDIA_CHAT_MODEL=nvidia/nemotron-3-super-120b-a12b
+NVIDIA_DEEP_CHAT_MODEL=nvidia/nemotron-3-ultra-550b-a55b
 ```
 
 Current mode behavior:
@@ -248,12 +314,38 @@ Current mode behavior:
 
 ## Evaluation
 
-The repo includes a lightweight evaluation harness in `scripts/run_eval.py` with cases in `evals/questions.jsonl`.
+90 cases: 75 factoid in `evals/questions.jsonl` covering all 77 documents, plus 15
+multi-hop questions in `evals/questions_multihop.jsonl` whose answers span 4-19
+documents each.
+
+Because retrieval is ACL-filtered, the harness needs a token. Baselines use one holding
+every group, so the numbers measure retrieval quality rather than ACL selectivity —
+`scripts/measure_acl_recall.py` covers that separately.
+
+```bash
+TOKEN=$(uv run python scripts/mint_token.py \
+  --groups all-employees managers hr-team finance-team executives)
+
+uv run python scripts/run_eval.py --api-url http://127.0.0.1:8000 --token "$TOKEN"
+```
+
+Compare a run against the frozen baseline:
+
+```bash
+uv run python scripts/eval_gate.py check evals/results_fast.jsonl \
+  --baseline evals/baseline_fast.json
+```
+
+The gate uses an exact one-sided **McNemar** test on the cases that changed verdict,
+because the two runs are paired. It reports a Newcombe interval for effect size and
+fails only when a change clears the measured noise floor — at n=75 a 5-point threshold
+fires on 4 cases flipping, which is inside the variance provider 503s alone produce.
+Latency and RAGAS are reported but never gated.
 
 Run against a local API:
 
 ```bash
-uv run python scripts/run_eval.py --api-url http://127.0.0.1:8000
+uv run python scripts/run_eval.py --api-url http://127.0.0.1:8000 --token "$TOKEN"
 ```
 
 Run against the deployed Railway API:
@@ -293,6 +385,25 @@ The script records:
 - per-case RAGAS scores under `ragas` when `--ragas` is set
 
 Generated eval output is written to `evals/results.jsonl` and is intentionally git-ignored.
+
+## Scripts
+
+| script | purpose |
+|---|---|
+| `scripts/ingest.py` | Incremental corpus ingest. Content-hashed, deletes orphans, `--dry-run` shows the diff without writing or embedding. |
+| `scripts/graph_index.py` | Build the GraphRAG entity graph: extract, resolve, cluster, summarise, embed. Staged and resumable. |
+| `scripts/mint_token.py` | Mint a dev JWT for a set of groups. |
+| `scripts/run_eval.py` | Run the eval suite against a live API, optionally RAGAS-scored. |
+| `scripts/eval_gate.py` | Freeze a baseline, or check a run against one with a paired McNemar test. |
+| `scripts/measure_acl_recall.py` | Price the recall cost of post-ANN ACL filtering against exact cosine. |
+| `scripts/injection_drill.py` | Plant a hostile policy document, verify the assistant ignores it, remove it. |
+
+Re-running `ingest.py` with no corpus change writes nothing:
+
+```bash
+uv run python scripts/ingest.py --dry-run
+# HR: 39 documents -> 73 chunks (new 0, changed 0, unchanged 73, deleted 0)
+```
 
 ## Development Checks
 

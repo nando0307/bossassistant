@@ -465,3 +465,35 @@ textarea:focus {
     width: 100%;
   }
 }
+
+/* Demo identity switcher. Changing persona changes which policy documents
+   retrieval may see, so it is placed above the department and mode toggles —
+   it is an access boundary, not a preference. */
+.persona-toggle {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem;
+  margin-bottom: 0.6rem;
+}
+
+.persona-toggle button {
+  padding: 0.35rem 0.7rem;
+  border-radius: 999px;
+  border: 1px solid rgba(148, 163, 184, 0.35);
+  background: transparent;
+  color: inherit;
+  font-size: 0.82rem;
+  cursor: pointer;
+}
+
+.persona-toggle button.selected {
+  border-color: rgba(56, 189, 248, 0.8);
+  background: rgba(56, 189, 248, 0.14);
+}
+
+.auth-note {
+  margin: 0 0 0.8rem;
+  font-size: 0.78rem;
+  opacity: 0.7;
+}

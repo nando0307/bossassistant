@@ -13,9 +13,14 @@ import {
   Sparkles,
   UserRound,
 } from 'lucide-react'
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import type { FormEvent } from 'react'
 import './App.css'
+
+type Persona = {
+  id: string
+  groups: string[]
+}
 
 type Department = 'hr' | 'finance'
 type DepartmentChoice = Department | 'auto'
@@ -47,10 +52,22 @@ const API_BASE_URL = (
   import.meta.env.VITE_API_URL ?? 'http://127.0.0.1:8000'
 ).replace(/\/$/, '')
 
+// Demo identities, fetched from the API so the UI never hardcodes an ACL.
+// Switching persona changes which policy documents retrieval is allowed to see,
+// which is the whole point of showing it here.
+const PERSONA_LABELS: Record<string, string> = {
+  employee: 'Employee',
+  manager: 'Manager',
+  'hr-partner': 'HR Partner',
+  'finance-analyst': 'Finance Analyst',
+  executive: 'Executive',
+}
+
 const examples = [
   'How much PTO do I accrue per year?',
   'What is the hotel budget for business travel to NYC?',
   'Can I expense a wellness benefit through Finance?',
+  'What approvals are required for an acquisition or divestiture?',
 ]
 
 function departmentLabel(department: AskResponse['department_routed']) {
@@ -66,6 +83,56 @@ function App() {
   const [conversation, setConversation] = useState<ConversationItem[]>([])
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [personas, setPersonas] = useState<Persona[]>([])
+  const [persona, setPersona] = useState<string>('employee')
+  // The token is stored with the persona it was issued for. Binding them means
+  // a request can never be sent with the previous persona's token while a new
+  // one is still in flight — which would ask as Employee using Executive access.
+  const [auth, setAuth] = useState<{ persona: string; token: string } | null>(null)
+  const [authNote, setAuthNote] = useState<string | null>(null)
+
+  // Fetch the persona list once. A 404 means demo auth is disabled, which is the
+  // default and not an error: the app then relies on a token supplied elsewhere.
+  useEffect(() => {
+    let cancelled = false
+    fetch(`${API_BASE_URL}/auth/personas`)
+      .then((r) => (r.ok ? r.json() : Promise.reject(new Error(String(r.status)))))
+      .then((data: { personas: Persona[] }) => {
+        if (!cancelled) setPersonas(data.personas)
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setPersonas([])
+          setAuthNote('Demo personas are disabled on this deployment.')
+        }
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  // Exchange the selected persona for a short-lived token whenever it changes.
+  useEffect(() => {
+    if (personas.length === 0) return
+    let cancelled = false
+    fetch(`${API_BASE_URL}/auth/demo`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ persona }),
+    })
+      .then((r) => (r.ok ? r.json() : Promise.reject(new Error(String(r.status)))))
+      .then((data: { token: string; groups: string[] }) => {
+        if (cancelled) return
+        setAuth({ persona, token: data.token })
+        setAuthNote(`Signed in as ${PERSONA_LABELS[persona] ?? persona} — groups: ${data.groups.join(', ')}`)
+      })
+      .catch(() => {
+        if (!cancelled) setAuthNote('Could not obtain a demo token.')
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [persona, personas])
 
   const latest = conversation[0]
   const canSubmit = question.trim().length > 0 && !isLoading
@@ -81,7 +148,13 @@ function App() {
     try {
       const response = await fetch(`${API_BASE_URL}/ask`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          // Retrieval is ACL-filtered, so an unauthenticated request is a 401.
+          ...(auth && auth.persona === persona
+            ? { Authorization: `Bearer ${auth.token}` }
+            : {}),
+        },
         body: JSON.stringify({
           question: nextQuestion,
           department: selectedDepartment,
@@ -89,6 +162,11 @@ function App() {
         }),
       })
 
+      if (response.status === 401) {
+        throw new Error(
+          'Not authorised. Pick a persona to obtain a demo token, or configure one.',
+        )
+      }
       if (!response.ok) {
         throw new Error(`API request failed with status ${response.status}`)
       }
@@ -170,6 +248,24 @@ function App() {
         </header>
 
         <form className="ask-form" onSubmit={handleSubmit}>
+          {personas.length > 0 && (
+            <div className="persona-toggle" aria-label="Demo identity">
+              <ShieldCheck size={16} />
+              {personas.map((item) => (
+                <button
+                  className={persona === item.id ? 'selected' : ''}
+                  key={item.id}
+                  onClick={() => setPersona(item.id)}
+                  title={`Groups: ${item.groups.join(', ')}`}
+                  type="button"
+                >
+                  <span>{PERSONA_LABELS[item.id] ?? item.id}</span>
+                </button>
+              ))}
+            </div>
+          )}
+          {authNote && <p className="auth-note">{authNote}</p>}
+
           <div className="department-toggle" aria-label="Department routing">
             {[
               { value: 'auto', label: 'Auto', icon: ArrowRight },
