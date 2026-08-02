@@ -59,6 +59,10 @@ class AskResponse(BaseModel):
     sources: list[Source]
     department_routed: Literal["hr", "finance", "both"]
     contexts: list[str] | None = None
+    #: True when the assistant declined for lack of supporting policy, as
+    #: opposed to answering. Exposed so abstention can be scored directly
+    #: instead of inferred from wording that changes with the model.
+    abstained: bool = False
 
 
 @app.get("/health")
@@ -133,4 +137,5 @@ def ask(
         sources=[Source(**source) for source in result["sources"]],
         department_routed=result["department_routed"],
         contexts=result["contexts"] if request.include_contexts else None,
+        abstained=result.get("abstained", False),
     )

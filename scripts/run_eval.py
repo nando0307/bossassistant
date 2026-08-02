@@ -175,6 +175,8 @@ def evaluate_case(
             "actual_sources": sorted(actual_sources),
             "source_hit": source_hit,
             "source_recall": source_recall,
+            "abstained": bool(response.get("abstained")),
+            "expect_abstention": bool(case.get("expect_abstention")),
             "missing_required_terms": missing_terms,
             "present_forbidden_terms": forbidden_terms,
             "quality_match": quality_match,
@@ -389,6 +391,13 @@ def main() -> None:
     source_hits = sum(1 for result in results if result.get("source_hit"))
     quality_matches = sum(1 for result in results if result.get("quality_match"))
     fully_passed = sum(1 for result in results if result.get("passed"))
+    # Abstention is scored separately from correctness. A system that abstains on
+    # everything scores perfectly on faithfulness and is useless, so precision
+    # (was the refusal warranted?) and recall (did it refuse when it should?) are
+    # reported as a pair — neither is meaningful alone.
+    abstained = [r for r in results if r.get("abstained")]
+    should = [r for r in results if r.get("expect_abstention")]
+    correct_abstentions = [r for r in abstained if r.get("expect_abstention")]
     recalls = [
         float(result["source_recall"])
         for result in results
@@ -404,6 +413,13 @@ def main() -> None:
     print(f"fully_passed={fully_passed}/{len(results)}")
     if recalls:
         print(f"source_recall={sum(recalls) / len(recalls):.3f} (n={len(recalls)})")
+    if abstained or should:
+        precision = len(correct_abstentions) / len(abstained) if abstained else float("nan")
+        recall_rate = len(correct_abstentions) / len(should) if should else float("nan")
+        print(
+            f"abstention_precision={precision:.3f} ({len(correct_abstentions)}/{len(abstained)}) "
+            f"abstention_recall={recall_rate:.3f} ({len(correct_abstentions)}/{len(should)})"
+        )
     print(f"avg_latency_seconds={avg_latency:.2f}")
     print(f"p50_latency_seconds={percentile(latencies, 50):.2f}")
     print(f"p95_latency_seconds={percentile(latencies, 95):.2f}")

@@ -18,6 +18,7 @@ from app.retrieval.rag import (
     format_contexts,
     format_sources,
     get_llm,
+    is_abstention_message,
 )
 
 
@@ -53,6 +54,10 @@ class AskResult(TypedDict):
     sources: list[dict[str, str | None]]
     department_routed: Literal["hr", "finance", "both"]
     contexts: list[str]
+    #: True when the assistant declined for lack of supporting policy. Surfaced
+    #: so abstention can be scored as its own metric rather than inferred from
+    #: answer wording, which drifts with the model.
+    abstained: bool
 
 
 ROUTER_SYSTEM = """You are a router that decides which department's assistant should answer a user's question.
@@ -272,6 +277,7 @@ def _answer_single_question(
             "sources": format_sources(docs),
             "department_routed": department,
             "contexts": format_contexts(docs),
+            "abstained": is_abstention_message(answer),
         }
 
     route = route_question(question)
@@ -282,6 +288,7 @@ def _answer_single_question(
             "sources": format_sources(docs),
             "department_routed": route,
             "contexts": format_contexts(docs),
+            "abstained": is_abstention_message(answer),
         }
 
     split_questions = split_department_questions(question)
@@ -303,6 +310,7 @@ def _answer_single_question(
         "sources": format_sources([*hr_docs, *finance_docs]),
         "department_routed": "both",
         "contexts": format_contexts([*hr_docs, *finance_docs]),
+        "abstained": is_abstention_message(hr_answer) and is_abstention_message(finance_answer),
     }
 
 
@@ -340,6 +348,8 @@ def answer_question(
             # departments its evidence came from.
             "department_routed": departments_of(graph_result["sources"]),
             "contexts": graph_result["contexts"],
+            "abstained": is_abstention_message(graph_result["answer"])
+            or "don't have that information" in graph_result["answer"].lower(),
         }
 
     if department is None and is_vague_subquestion(question):
@@ -348,6 +358,7 @@ def answer_question(
             "sources": [],
             "department_routed": "both",
             "contexts": [],
+            "abstained": False,
         }
 
     subquestions = split_user_questions(question) if department is None else []
@@ -356,6 +367,7 @@ def answer_question(
         sources: list[dict[str, str | None]] = []
         contexts: list[str] = []
         routed_departments: set[Literal["hr", "finance", "both"]] = set()
+        abstentions: list[bool] = []
 
         with ThreadPoolExecutor(max_workers=min(len(subquestions), 4)) as executor:
             futures: list[Future[AskResult] | None] = []
@@ -376,6 +388,7 @@ def answer_question(
                 sources.extend(result["sources"])
                 contexts.extend(result["contexts"])
                 routed_departments.add(result["department_routed"])
+                abstentions.append(result["abstained"])
 
         if routed_departments == {"hr"}:
             routed: Literal["hr", "finance", "both"] = "hr"
@@ -389,6 +402,7 @@ def answer_question(
             "sources": dedupe_sources(sources),
             "department_routed": routed,
             "contexts": contexts,
+            "abstained": all(abstentions) if abstentions else False,
         }
 
     return _answer_single_question(question, department, mode=mode, groups=groups)
