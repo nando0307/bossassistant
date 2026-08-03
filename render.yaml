@@ -1,0 +1,82 @@
+# Render blueprint — https://render.com/docs/blueprint-spec
+#
+# Deploy: Render dashboard -> New -> Blueprint -> pick this repo. Render reads
+# this file, creates the service, and prompts for the values marked `sync: false`.
+#
+# Why a container and not a serverless function: measured p95 is 31s and the
+# graph path has hit 191s, well past any function duration cap. The service also
+# keeps an in-process semantic cache and a pooled Neo4j driver, both of which a
+# per-invocation runtime throws away.
+services:
+  - type: web
+    name: bossassistant-api
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    plan: free
+    region: oregon
+    healthCheckPath: /health
+    autoDeploy: true
+
+    envVars:
+      # --- Auth ---
+      # Render generates this once and keeps it. The app refuses to start with
+      # REQUIRE_AUTH=true and no secret rather than serving restricted policy to
+      # anonymous callers, so leaving it unset is a boot failure, not a warning.
+      - key: JWT_SECRET
+        generateValue: true
+      - key: REQUIRE_AUTH
+        value: "true"
+      # Mints tokens for demo personas with NO credential check, which is what
+      # lets the hosted demo show ACL-scoped retrieval. Safe here only because
+      # the corpus is synthetic. Never set this on a deployment holding real
+      # policy documents.
+      - key: ENABLE_DEMO_AUTH
+        value: "true"
+
+      # --- Neo4j (prompted on first deploy) ---
+      - key: NEO4J_URI
+        sync: false
+      - key: NEO4J_USER
+        sync: false
+      - key: NEO4J_PASSWORD
+        sync: false
+      - key: NEO4J_DATABASE
+        sync: false
+
+      # --- NVIDIA ---
+      - key: NVIDIA_API_KEY
+        sync: false
+      # qwen/qwen3-next-80b-a3b-instruct reached end-of-life and returns 410.
+      - key: NVIDIA_CHAT_MODEL
+        value: nvidia/nemotron-3-super-120b-a12b
+      - key: NVIDIA_DEEP_CHAT_MODEL
+        value: nvidia/nemotron-3-ultra-550b-a55b
+      - key: NVIDIA_MAX_TOKENS
+        value: "384"
+
+      # Reranking is an optional extra and is not installed in the image; it
+      # would pull torch plus CUDA wheels that do not fit a 512MB free instance.
+      - key: ENABLE_RERANKER
+        value: "false"
+
+      # --- App ---
+      - key: APP_ENV
+        value: production
+      - key: LOG_LEVEL
+        value: INFO
+      # Must include the Vercel frontend origin, no trailing slash.
+      - key: CORS_ORIGINS
+        sync: false
+      - key: ENABLE_SEMANTIC_CACHE
+        value: "true"
+
+      # --- Optional tracing ---
+      - key: LANGFUSE_TRACING
+        value: "false"
+      - key: LANGFUSE_PUBLIC_KEY
+        sync: false
+      - key: LANGFUSE_SECRET_KEY
+        sync: false
+      - key: LANGFUSE_HOST
+        value: https://cloud.langfuse.com

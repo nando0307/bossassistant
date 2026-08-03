@@ -272,6 +272,31 @@ LANGFUSE_HOST=https://cloud.langfuse.com
 
 ## Deployment
 
+### Render (blueprint, free tier)
+
+`render.yaml` describes the service. In the Render dashboard: **New → Blueprint →**
+select this repo. Render builds the Dockerfile, generates `JWT_SECRET` itself, and
+prompts for the eight values marked `sync: false` (Neo4j credentials, `NVIDIA_API_KEY`,
+`CORS_ORIGINS`, and the optional Langfuse keys).
+
+Then point the frontend at it: set `VITE_API_URL` in Vercel to the Render URL and
+redeploy, and make sure `CORS_ORIGINS` contains the Vercel origin with no trailing slash.
+
+Measured fit for the free instance:
+
+- **356MB peak RSS** after importing the full serving path, against a 512MB limit.
+  That headroom only exists because reranking is an optional extra — with torch
+  installed the image does not fit.
+- Free instances **spin down after ~15 minutes idle**, so the first request afterwards
+  pays a cold start on top of normal latency.
+
+A serverless platform is the wrong shape for this service regardless of provider:
+measured p95 is 31s and the graph path has reached 191s, past any function duration cap,
+and the in-process semantic cache and pooled Neo4j driver both assume a process that
+outlives a request.
+
+### Railway
+
 Backend:
 
 - Railway builds the root Dockerfile.
