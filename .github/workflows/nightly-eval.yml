@@ -47,6 +47,12 @@ jobs:
       - uses: astral-sh/setup-uv@v5
         with:
           enable-cache: true
+          # Skip the post-job `uv cache prune`. It hung for five minutes and then
+          # exited 2, turning a run whose every real step succeeded — and whose
+          # gate passed — into a red X. A nightly that fails for cache
+          # housekeeping teaches people to ignore it, which defeats the point of
+          # having it.
+          prune-cache: false
 
       - run: uv sync --all-extras --dev
 
