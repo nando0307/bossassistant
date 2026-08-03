@@ -15,6 +15,10 @@ on:
         type: choice
         options: [fast, graph]
         default: fast
+      ragas:
+        description: "Also score faithfulness/relevancy (slow — subset only)"
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -23,7 +27,7 @@ permissions:
 jobs:
   eval:
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 40
     env:
       NEO4J_URI: ${{ secrets.NEO4J_URI }}
       NEO4J_USER: ${{ secrets.NEO4J_USER }}
@@ -35,6 +39,7 @@ jobs:
       JWT_SECRET: ${{ secrets.JWT_SECRET }}
       REQUIRE_AUTH: "true"
       MODE: ${{ inputs.mode || 'fast' }}
+      RAGAS: ${{ inputs.ragas && 'true' || 'false' }}
 
     steps:
       - uses: actions/checkout@v4
@@ -65,14 +70,28 @@ jobs:
           echo "::add-mask::$TOKEN"
           echo "token=$TOKEN" >> "$GITHUB_OUTPUT"
 
+      # No --ragas by default, and that is a deliberate scoping decision rather
+      # than a shortcut. The gate decides on per-case booleans and only reports
+      # RAGAS as context, so scoring adds nothing to the regression signal — but
+      # it dominates the wall clock. A judge pass over 75 cases has taken 30+
+      # minutes against this provider and cancelled a 60-minute run at the cap,
+      # which is how a nightly gate turns into a daily red X people stop reading.
+      #
+      # Scored runs are available on demand: workflow_dispatch with ragas=true,
+      # over a subset small enough to finish.
       - name: Run eval suite
+        timeout-minutes: 25
         run: |
+          EXTRA=""
+          if [ "$RAGAS" = "true" ]; then
+            EXTRA="--ragas --limit 15"
+          fi
           uv run python scripts/run_eval.py \
             --api-url http://127.0.0.1:8000 \
             --token "${{ steps.token.outputs.token }}" \
             --mode "$MODE" \
             --timeout 180 --retries 3 --retry-delay 5 \
-            --ragas \
+            $EXTRA \
             --output evals/nightly_${MODE}.jsonl
 
       - name: Compare against baseline
