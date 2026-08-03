@@ -7,13 +7,14 @@ Department-scoped RAG assistant for HR and Finance policy questions.
 BossAssistant started as a Colab prototype and is now a deployed full-stack app over a
 77-document policy corpus:
 
-- FastAPI backend on Railway, React/Vite frontend on Vercel
+- FastAPI backend on Render, React/Vite frontend on Vercel
 - **JWT-scoped retrieval** — the caller's groups filter chunks *during* retrieval
 - Neo4j AuraDB hybrid vector + keyword retrieval, plus a **GraphRAG entity graph**
 - Incremental ingestion with content hashing, deletes, and policy supersession
 - Indirect prompt-injection defence and measured abstention
 - SSE streaming, an ACL-partitioned semantic cache, per-request cost accounting
-- A 90-case eval suite with a statistical (paired McNemar) regression gate
+- A 90-case eval suite with a statistical (paired McNemar) regression gate, run nightly
+  by GitHub Actions
 
 ## What This Demonstrates
 
@@ -24,7 +25,7 @@ BossAssistant started as a Colab prototype and is now a deployed full-stack app 
   superseded policies dropped at query time
 - An eval *process* — frozen baselines, a nightly gate that only fails on changes
   clearing the noise floor
-- Full-stack deployment with Railway, Vercel, Docker, and GitHub Actions CI
+- Full-stack deployment with Render, Vercel, Docker, and GitHub Actions CI
 
 For a recruiter-facing project summary, see [docs/portfolio.md](docs/portfolio.md).
 
@@ -59,9 +60,11 @@ curl https://bossassistant.onrender.com/ready
 ### Demo personas (when `ENABLE_DEMO_AUTH=true`)
 
 ```bash
+export API=https://bossassistant.onrender.com
+
 curl -s $API/auth/personas
-curl -s -X POST $API/auth/demo -H 'Content-Type: application/json' \
-  -d '{"persona":"executive"}'
+TOKEN=$(curl -s -X POST $API/auth/demo -H 'Content-Type: application/json' \
+  -d '{"persona":"executive"}' | python3 -c "import json,sys; print(json.load(sys.stdin)['token'])")
 ```
 
 Retrieval is ACL-filtered, so the same question answers differently per persona:
@@ -74,8 +77,9 @@ Retrieval is ACL-filtered, so the same question answers differently per persona:
 ### Ask
 
 ```bash
-curl -s https://bossassistant.onrender.com/ask \
+curl -s $API/ask \
   -H 'Content-Type: application/json' \
+  -H "Authorization: Bearer $TOKEN" \
   -d '{"question":"How much PTO do I accrue per year?","department":"hr"}'
 ```
 
@@ -125,9 +129,13 @@ Response shape:
       "preview": "Paid Time Off (PTO) Policy..."
     }
   ],
-  "department_routed": "hr"
+  "department_routed": "hr",
+  "abstained": false
 }
 ```
+
+`abstained` is `true` when the model declined for lack of supporting policy, so it can be
+scored as its own metric rather than inferred from the answer's wording.
 
 ## Local Development
 
@@ -219,27 +227,42 @@ Do not commit real secrets. Use `.env.example` files for placeholders only.
 React/Vite frontend
         |
         v
-FastAPI /ask endpoint
+FastAPI  /ask  or  /ask/stream    <-- JWT: sub + groups
         |
         v
-Department router
-        |
-        +--> Multi-question splitter / clarification guard
-        |
-        +--> HR retriever     --> Neo4j hr_vector + hr_keyword
-        |
-        +--> Finance retriever --> Neo4j fin_vector + fin_keyword
+Follow-up rewrite (resolves "what about internationally?" against history)
         |
         v
-NVIDIA LLM answer generation
+Semantic cache lookup    <-- partitioned by ACL group; a hit skips everything below
+        |
+        v
+Department / graph router
+        |
+        +--> HR retriever      --> Neo4j hr_vector + hr_keyword    \
+        |                                                           +--> ACL filter (post-ANN)
+        +--> Finance retriever --> Neo4j fin_vector + fin_keyword  /       + supersession drop
+        |
+        +--> GraphRAG local/global search --> entity graph
+        |
+        v
+Retrieved text fenced as untrusted data (injection defence)
+        |
+        v
+NVIDIA LLM answer generation, or abstention
 ```
 
 Retrieval flow:
 
-1. Retrieve relevant chunks from Neo4j hybrid search.
+1. Retrieve candidate chunks from Neo4j hybrid search (or the GraphRAG entity graph in
+   `"graph"` mode).
 2. Optionally generate alternate queries and merge ranked results with Reciprocal Rank Fusion.
-3. Optionally rerank with `BAAI/bge-reranker-large`.
-4. Generate a grounded answer using retrieved policy chunks.
+3. Filter to what the caller's JWT groups may read, and drop any chunk a later policy has
+   superseded. Both run **after** the ANN search returns candidates — Neo4j's vector index
+   has no pre-filter predicate — so retrieval over-fetches by a measured factor to keep
+   recall from collapsing for narrowly-scoped callers.
+4. Optionally rerank with `BAAI/bge-reranker-large` (`uv sync --extra rerank`).
+5. Fence the retrieved text as untrusted data and generate a grounded answer, or abstain
+   with a fixed marker if nothing retrieved supports one.
 
 Routing behavior:
 
@@ -248,6 +271,9 @@ Routing behavior:
 - Cross-department questions route to both departments.
 - Bundled prompts are split and answered one question at a time.
 - Vague standalone questions, such as "How much do I get?", ask for clarification instead of guessing.
+- Follow-ups referencing earlier turns (`"What about for contractors?"`) are rewritten
+  into a standalone question before routing, using the optional `history` field.
+- `"mode": "graph"` skips department routing and answers from the entity graph instead.
 
 Fast mode is the default for deployed latency. Use request-level `"mode": "deep"` for notebook-faithful multi-query retrieval experiments.
 
@@ -304,18 +330,19 @@ measured p95 is 31s and the graph path has reached 191s, past any function durat
 and the in-process semantic cache and pooled Neo4j driver both assume a process that
 outlives a request.
 
-### Railway
+This project was previously hosted on Railway; that deployment was retired once its free
+trial credit ran out and now returns "Application not found." The Dockerfile and env vars
+below are platform-agnostic and apply to any container host — Railway included, if you
+have a paid plan or fresh trial:
 
-Backend:
-
-- Railway builds the root Dockerfile.
-- Pushes to `main` trigger automatic redeploys.
-- `CORS_ORIGINS` must include the deployed Vercel frontend URL.
 - **`JWT_SECRET` must be set.** The app refuses to start with `REQUIRE_AUTH=true` and no
   secret, rather than serving restricted policy to anonymous callers.
+- `CORS_ORIGINS` must include the deployed Vercel frontend URL, no trailing slash.
 - Set `ENABLE_DEMO_AUTH=true` only on a demo deployment. It mints tokens for named
   personas with no credential check, which is what makes the hosted demo able to show
   ACL-scoped retrieval — and an authentication bypass anywhere else.
+- The Dockerfile binds `${PORT:-8000}` in shell form so it works with whatever port the
+  platform assigns; hardcoding a port is a common silent failure on PaaS containers.
 
 Frontend:
 
@@ -323,7 +350,7 @@ Frontend:
 - Framework preset: Vite
 - Build command: `npm run build`
 - Output directory: `dist`
-- `VITE_API_URL` points to the Railway API URL.
+- `VITE_API_URL` points to the deployed API URL (Render, above).
 
 ## Roadmap
 
@@ -388,28 +415,34 @@ fails only when a change clears the measured noise floor — at n=75 a 5-point t
 fires on 4 cases flipping, which is inside the variance provider 503s alone produce.
 Latency and RAGAS are reported but never gated.
 
+`.github/workflows/nightly-eval.yml` runs this automatically at 07:00 UTC daily against
+the fast-mode baseline, publishes a job summary, and opens a GitHub issue labelled
+`eval-regression` only when the gate actually fails — not on ordinary provider noise.
+RAGAS scoring is opt-in there (`workflow_dispatch` with `ragas: true`, over a 15-case
+subset) since a judge pass dominates wall clock far more than the eval itself.
+
 Run against a local API:
 
 ```bash
 uv run python scripts/run_eval.py --api-url http://127.0.0.1:8000 --token "$TOKEN"
 ```
 
-Run against the deployed Railway API:
+Run against the deployed API:
 
 ```bash
-uv run python scripts/run_eval.py --api-url https://bossassistant.onrender.com --mode fast
+uv run python scripts/run_eval.py --api-url https://bossassistant.onrender.com --token "$TOKEN" --mode fast
 ```
 
 Run a small deep-mode smoke eval with a bounded request timeout:
 
 ```bash
-uv run python scripts/run_eval.py --api-url https://bossassistant.onrender.com --mode deep --limit 2 --timeout 45
+uv run python scripts/run_eval.py --api-url https://bossassistant.onrender.com --token "$TOKEN" --mode deep --limit 2 --timeout 45
 ```
 
 Score answer quality with RAGAS (faithfulness + answer relevance):
 
 ```bash
-uv run python scripts/run_eval.py --api-url http://127.0.0.1:8000 --mode deep --ragas
+uv run python scripts/run_eval.py --api-url http://127.0.0.1:8000 --token "$TOKEN" --mode deep --ragas
 ```
 
 `--ragas` makes the harness request `include_contexts` so each answer is graded
