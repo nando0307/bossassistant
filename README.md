@@ -312,6 +312,18 @@ Current mode behavior:
 - Reranking runs in `"deep"` mode when `ENABLE_RERANKER=true`.
 - Replace the local `BAAI/bge-reranker-large` cross-encoder with a hosted reranker before making deep mode production-default.
 
+Reranking is an **optional extra**, not a base dependency:
+
+```bash
+uv sync --extra rerank    # only needed to run with ENABLE_RERANKER=true
+```
+
+`sentence-transformers` pulls torch and transformers (~470MB installed on macOS, and
+15 additional CUDA wheels on Linux) plus a ~1.5GB model download on first use. It runs
+only in deep mode with `ENABLE_RERANKER=true`, which is off by default, so the serving
+image does not carry it. `get_reranker()` raises with install instructions if the flag
+is set without the extra.
+
 ## Evaluation
 
 90 cases: 75 factoid in `evals/questions.jsonl` covering all 77 documents, plus 15

@@ -169,8 +169,12 @@ dependencies = [
     { name = "pydantic-settings" },
     { name = "pyjwt" },
     { name = "python-dotenv" },
-    { name = "sentence-transformers" },
     { name = "uvicorn", extra = ["standard"] },
+]
+
+[package.optional-dependencies]
+rerank = [
+    { name = "sentence-transformers" },
 ]
 
 [package.dev-dependencies]
@@ -179,6 +183,7 @@ dev = [
     { name = "pytest" },
     { name = "ragas" },
     { name = "ruff" },
+    { name = "sentence-transformers" },
 ]
 
 [package.metadata]
@@ -196,9 +201,10 @@ requires-dist = [
     { name = "pydantic-settings", specifier = ">=2.14.0" },
     { name = "pyjwt", specifier = ">=2.10" },
     { name = "python-dotenv", specifier = ">=1.2.2" },
-    { name = "sentence-transformers", specifier = ">=5.5.0" },
+    { name = "sentence-transformers", marker = "extra == 'rerank'", specifier = ">=5.5.0" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.45.0" },
 ]
+provides-extras = ["rerank"]
 
 [package.metadata.requires-dev]
 dev = [
@@ -206,6 +212,7 @@ dev = [
     { name = "pytest", specifier = ">=9.0.3" },
     { name = "ragas", specifier = ">=0.2" },
     { name = "ruff", specifier = ">=0.15.11" },
+    { name = "sentence-transformers", specifier = ">=5.5.0" },
 ]
 
 [[package]]

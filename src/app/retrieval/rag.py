@@ -4,7 +4,7 @@ import logging
 import re
 from functools import lru_cache
 from collections.abc import Iterator
-from typing import Any, Literal, cast
+from typing import TYPE_CHECKING, Any, Literal, cast
 
 from langchain_core.documents import Document
 from langchain_core.load import dumps, loads
@@ -13,11 +13,13 @@ from langchain_core.prompts import ChatPromptTemplate
 from langchain_neo4j import Neo4jVector
 from langchain_neo4j.vectorstores.neo4j_vector import SearchType
 from langchain_nvidia_ai_endpoints import ChatNVIDIA, NVIDIAEmbeddings
-from sentence_transformers import CrossEncoder
 
 from app.config import settings
 from app.observability import langchain_config
 from app.security import neutralize_delimiters, scan_for_injection, wrap_untrusted
+
+if TYPE_CHECKING:  # pragma: no cover - typing only
+    from sentence_transformers import CrossEncoder
 
 logger = logging.getLogger(__name__)
 
@@ -127,7 +129,20 @@ def get_embedder() -> NVIDIAEmbeddings:
 
 @lru_cache(maxsize=1)
 def get_reranker() -> CrossEncoder:
-    return CrossEncoder("BAAI/bge-reranker-large", max_length=512)
+    """Load the cross-encoder, importing torch only if reranking is actually used.
+
+    A module-level import would put ~470MB of torch and transformers into every
+    serving image for a feature that is off by default and never runs on the
+    request path. Installed via the `rerank` extra.
+    """
+    try:
+        from sentence_transformers import CrossEncoder as _CrossEncoder
+    except ImportError as exc:  # pragma: no cover - depends on install extras
+        raise RuntimeError(
+            "ENABLE_RERANKER is set but sentence-transformers is not installed. "
+            "Install the optional extra: uv sync --extra rerank"
+        ) from exc
+    return _CrossEncoder("BAAI/bge-reranker-large", max_length=512)
 
 
 @lru_cache(maxsize=2)

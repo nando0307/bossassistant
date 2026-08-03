@@ -21,8 +21,16 @@ dependencies = [
     "pydantic-settings>=2.14.0",
     "pyjwt>=2.10",
     "python-dotenv>=1.2.2",
-    "sentence-transformers>=5.5.0",
     "uvicorn[standard]>=0.45.0",
+]
+
+[project.optional-dependencies]
+# Cross-encoder reranking pulls torch and transformers - roughly 470MB installed,
+# plus a ~1.5GB model download on first use. It only runs in deep mode with
+# ENABLE_RERANKER=true, which is off by default, so the serving image should not
+# carry it. Install with: uv sync --extra rerank
+rerank = [
+    "sentence-transformers>=5.5.0",
 ]
 
 
@@ -33,6 +41,8 @@ build-backend = "uv_build"
 [dependency-groups]
 dev = [
     "mypy>=1.20.1",
+    # Present in dev so type checking and tests see the real CrossEncoder.
+    "sentence-transformers>=5.5.0",
     "pytest>=9.0.3",
     "ragas>=0.2",
     "ruff>=0.15.11",
