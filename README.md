@@ -30,21 +30,30 @@ For a recruiter-facing project summary, see [docs/portfolio.md](docs/portfolio.m
 
 ## Live App
 
-- Frontend: https://bossassistant-my7qsq9aj-nando0307s-projects.vercel.app
-- API: https://bossassistant-production.up.railway.app
+Hosted on free tiers: the API idles down after ~15 minutes of inactivity, so the first
+request after a quiet period pays a cold start of roughly 30 seconds. That is the
+platform, not the app.
+
+The UI has a **persona switcher**. Retrieval is ACL-filtered, so asking *"What approvals
+are required for an acquisition?"* as **Employee** returns "Not covered in policy" with
+the documents it checked, while **Executive** returns the board-approval rule and cites
+FIN-037. Same question, same deployment, different access.
+
+- Frontend: https://bossassistant.vercel.app
+- API: https://bossassistant.onrender.com
 
 ## API
 
 ### Health
 
 ```bash
-curl https://bossassistant-production.up.railway.app/health
+curl https://bossassistant.onrender.com/health
 ```
 
 ### Readiness
 
 ```bash
-curl https://bossassistant-production.up.railway.app/ready
+curl https://bossassistant.onrender.com/ready
 ```
 
 ### Demo personas (when `ENABLE_DEMO_AUTH=true`)
@@ -65,7 +74,7 @@ Retrieval is ACL-filtered, so the same question answers differently per persona:
 ### Ask
 
 ```bash
-curl -s https://bossassistant-production.up.railway.app/ask \
+curl -s https://bossassistant.onrender.com/ask \
   -H 'Content-Type: application/json' \
   -d '{"question":"How much PTO do I accrue per year?","department":"hr"}'
 ```
@@ -388,13 +397,13 @@ uv run python scripts/run_eval.py --api-url http://127.0.0.1:8000 --token "$TOKE
 Run against the deployed Railway API:
 
 ```bash
-uv run python scripts/run_eval.py --api-url https://bossassistant-production.up.railway.app --mode fast
+uv run python scripts/run_eval.py --api-url https://bossassistant.onrender.com --mode fast
 ```
 
 Run a small deep-mode smoke eval with a bounded request timeout:
 
 ```bash
-uv run python scripts/run_eval.py --api-url https://bossassistant-production.up.railway.app --mode deep --limit 2 --timeout 45
+uv run python scripts/run_eval.py --api-url https://bossassistant.onrender.com --mode deep --limit 2 --timeout 45
 ```
 
 Score answer quality with RAGAS (faithfulness + answer relevance):

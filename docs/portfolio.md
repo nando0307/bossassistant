@@ -11,8 +11,12 @@ The part worth reading about is not that it retrieves documents. It is that **al
 claim in this document is a number produced by a harness in the repo**, including the ones
 that came out worse than expected.
 
-Live app: https://bossassistant-my7qsq9aj-nando0307s-projects.vercel.app
-API: https://bossassistant-production.up.railway.app
+Live app: https://bossassistant.vercel.app
+API: https://bossassistant.onrender.com
+
+Both are on free tiers — the API idles down after ~15 minutes, so a first request may
+take ~30s. The UI includes a persona switcher; the same question answers differently for
+Employee and Executive, which is the access-control work made visible.
 
 ## Problem
 
