@@ -25,8 +25,14 @@ npm run preview
 - Questions use the complete-answer `POST /ask` contract: `{ question, department, mode }`. Auto sends `department: null`; explicit choices send `hr` or `finance`. Search mode remains `fast` or `deep`. This UI does not use `/ask/stream`.
 - Responses display `answer`, `department_routed`, and `sources`. Answer line breaks are preserved as plain text; backend text is not interpreted as HTML. Source titles, previews and identifiers stay beside their own answer, including earlier answers. Identifiers are not assumed to be public URLs. Empty source lists are explicitly identified.
 - Pending requests lock the question and options so completion cannot erase a newly edited draft. Failed questions remain in the form. `Try again` submits the current question and options; it is never an automatic retry. No provider health or failover status is inferred.
-- Demo identities come from `GET /auth/personas`; `POST /auth/demo` exchanges the selected identity for its token. Submission waits for the selected demo identity's token. A 404 means demo access is disabled; connection/server failures instead offer an access retry. A 401 requires renewed demo access or administrator assistance. This frontend does not add a production login or token-entry product.
+- Demo identities come from `GET /auth/personas`; `POST /auth/demo` exchanges the selected identity for its token. Submission waits for discovery and the selected demo identity's token, including during access retries. Only a 404 confirms demo access is disabled; connection/server failures instead block submission and offer an access retry. A 401 requires renewed demo access or administrator assistance. This frontend does not add a production login or token-entry product.
 - Answers are held only in the current page's memory and disappear on reload. No chat persistence is added.
+
+Run the access-readiness regression check with Node 22.18+ from `frontend/`:
+
+```sh
+node --test tests/access.test.ts
+```
 
 ## Accessibility and responsive behavior
 
@@ -37,7 +43,7 @@ Manual browser smoke check:
 1. Use Tab and Enter to follow **Skip to question**, enter a question, select HR/Finance and Fast/Deep, then submit. Confirm the request payload and the selected states.
 2. While the API is pending, confirm the question/options are disabled and a waiting message appears, without claiming provider progress.
 3. Return an answer containing paragraphs and citations. Confirm line breaks, source previews, and focus on the answer heading. Ask again and confirm each answer retains its own sources.
-4. Return HTTP 503, then retry successfully. Confirm the question and choices survive the error. Return 401 and renew demo access before retrying. Distinguish failed persona lookup from a 404-disabled deployment.
+4. Return HTTP 503, then retry successfully. Confirm the question and choices survive the error. Return 401 and renew demo access before retrying. Keep persona lookup pending, fail it, and retry: submission must stay disabled throughout, until a selected-persona token arrives. Distinguish this from a 404-disabled deployment.
 5. Return an empty source list and confirm the missing-evidence warning. Check 320px, 390px, 768px, 1024px and 1440px viewports for horizontal overflow and readable answers.
 
 When live credentials/data are unavailable, use an isolated local API with synthetic content and the same contracts. This proves UI behavior only, not production authentication, retrieval quality or provider availability.
@@ -56,4 +62,4 @@ python3 "$UPSTREAM/src/ui-ux-pro-max/scripts/search.py" 'keyboard focus visible'
 python3 "$UPSTREAM/src/ui-ux-pro-max/scripts/search.py" 'financial trustworthy' --domain typography -n 1
 ```
 
-Used the enterprise-app Minimalism & Swiss Style recommendation: functional grid, clear hierarchy, high contrast, navy `#0F172A`, secondary `#1E3A8A`, accessible gold action `#A16207`, background `#F8FAFC`, and IBM Plex Sans. The font loads from the recommended Google Fonts family with system-font fallbacks. Applied visible focus, error recovery, labeled controls and progressive disclosure guidance. The generator's marketing conversion sections and modal-specific advice do not fit this existing question workspace and were not applied.
+Used the enterprise-app Minimalism & Swiss Style recommendation: functional grid, clear hierarchy, high contrast, navy `#0F172A`, secondary `#1E3A8A`, accessible gold action `#A16207`, background `#F8FAFC`, and the existing system-font stack. Typography makes no external font requests. Applied visible focus, error recovery, labeled controls and progressive disclosure guidance. The generator's marketing conversion sections and modal-specific advice do not fit this existing question workspace and were not applied.

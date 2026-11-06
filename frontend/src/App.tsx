@@ -14,6 +14,8 @@ import {
 } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import type { FormEvent } from 'react'
+import { hasAskAccess } from './access'
+import type { DiscoveryState } from './access'
 import './App.css'
 
 type Persona = {
@@ -83,6 +85,7 @@ function App() {
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [personas, setPersonas] = useState<Persona[]>([])
+  const [discovery, setDiscovery] = useState<DiscoveryState>('pending')
   const [persona, setPersona] = useState<string>('employee')
   // The token is stored with the persona it was issued for. Binding them means
   // a request can never be sent with the previous persona's token while a new
@@ -99,19 +102,23 @@ function App() {
   useEffect(() => {
     let cancelled = false
     fetch(`${API_BASE_URL}/auth/personas`)
-      .then((r) => {
-        if (r.status === 404) return { personas: [] }
+      .then(async (r) => {
+        if (r.status === 404) return { state: 'disabled' as const, personas: [] }
         if (!r.ok) throw new Error(String(r.status))
-        return r.json()
+        const data = await r.json() as { personas: Persona[] }
+        if (!data.personas.length) throw new Error('No demo identities available')
+        return { state: 'enabled' as const, personas: data.personas }
       })
-      .then((data: { personas: Persona[] }) => {
+      .then(({ state, personas }) => {
         if (cancelled) return
-        setPersonas(data.personas)
-        setAuthNote(data.personas.length ? 'Preparing demo access...' : 'Demo access is not enabled. An authorized session is required to ask questions.')
+        setPersonas(personas)
+        setDiscovery(state)
+        setAuthNote(state === 'enabled' ? 'Preparing demo access...' : 'Demo access is not enabled. An authorized session is required to ask questions.')
       })
       .catch(() => {
         if (!cancelled) {
           setPersonas([])
+          setDiscovery('failed')
           setAuthFailed(true)
           setAuthNote('Could not check demo access. Check your connection and retry.')
         }
@@ -123,7 +130,7 @@ function App() {
 
   // Exchange the selected persona for a short-lived token whenever it changes.
   useEffect(() => {
-    if (personas.length === 0) return
+    if (discovery !== 'enabled') return
     let cancelled = false
     fetch(`${API_BASE_URL}/auth/demo`, {
       method: 'POST',
@@ -146,18 +153,18 @@ function App() {
     return () => {
       cancelled = true
     }
-  }, [persona, personas])
+  }, [persona, discovery])
 
   const latest = conversation[0]
-  const accessPending = personas.length > 0 && auth?.persona !== persona
-  const canSubmit = question.trim().length > 0 && !isLoading && !accessPending
+  const accessReady = hasAskAccess(discovery, persona, auth)
+  const canSubmit = question.trim().length > 0 && !isLoading && accessReady
 
   useEffect(() => {
     if (latest) answerHeading.current?.focus()
   }, [latest])
 
   async function askBossAssistant(nextQuestion: string) {
-    if (isLoading || accessPending) return
+    if (isLoading || !accessReady) return
     setIsLoading(true)
     setError(null)
 
@@ -179,15 +186,15 @@ function App() {
       })
 
       if (response.status === 401) {
-        if (personas.length) {
+        if (discovery === 'enabled') {
           setAuth(null)
           setAuthFailed(true)
           setAuthNote('Demo access expired or was not accepted. Retry demo access.')
         }
         throw new Error(
-          personas.length
-            ? 'Your demo access could not be verified. Retry demo access, then ask again.'
-            : 'An authorized session is required. Contact your administrator for access.',
+          discovery === 'disabled'
+            ? 'An authorized session is required. Contact your administrator for access.'
+            : 'Your demo access could not be verified. Retry demo access, then ask again.',
         )
       }
       if (response.status === 503) {
@@ -343,6 +350,7 @@ function App() {
               {authFailed ? (
                 <button className="text-button" type="button" disabled={isLoading} onClick={() => {
                   setAuth(null)
+                  setDiscovery('pending')
                   setAuthFailed(false)
                   setAuthNote('Checking demo access...')
                   setAuthAttempt((attempt) => attempt + 1)
