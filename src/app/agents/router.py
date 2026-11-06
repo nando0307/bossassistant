@@ -8,6 +8,7 @@ from typing import Any, Literal, TypedDict, cast
 
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import ChatPromptTemplate
+from openai import APIError
 from pydantic import BaseModel, Field
 
 from app.cache import get_cache
@@ -219,7 +220,7 @@ def route_question(question: str) -> Literal["hr", "finance", "both"]:
             ("human", "{question}"),
         ]
     )
-    structured_llm = get_llm().with_structured_output(RouteQuery)
+    structured_llm = get_llm().with_structured_output(RouteQuery, method="json_schema", strict=True)
     route = cast(
         RouteQuery,
         (prompt | structured_llm).invoke(
@@ -332,6 +333,8 @@ def rewrite_followup(question: str, history: list[dict[str, str]] | None) -> str
             {"transcript": transcript, "question": question},
             config=langchain_config("followup_rewrite"),
         )
+    except APIError:
+        raise  # Gateway exhaustion must not silently start another generation budget.
     except Exception:  # noqa: BLE001 - a failed rewrite must not fail the answer
         return question
     cleaned = " ".join(rewritten.split()).strip().strip('"')

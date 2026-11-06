@@ -9,10 +9,12 @@ authors = [
 requires-python = ">=3.12"
 dependencies = [
     "fastapi>=0.136.0",
+    "httpx>=0.28.1",
     "langchain>=1.2.15",
     "langchain-community>=0.4.1",
     "langchain-neo4j>=0.9.0",
     "langchain-nvidia-ai-endpoints>=1.2.1",
+    "langchain-openai>=1.1.0,<2",
     "langchain-text-splitters>=1.1.2",
     "langfuse>=4.6.1",
     "langgraph>=1.1.9",

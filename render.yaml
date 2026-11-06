@@ -44,15 +44,18 @@ services:
       - key: NEO4J_DATABASE
         sync: false
 
-      # --- NVIDIA ---
+      # Embeddings and offline jobs keep their independent NVIDIA credential.
       - key: NVIDIA_API_KEY
         sync: false
-      # qwen/qwen3-next-80b-a3b-instruct reached end-of-life and returns 410.
-      - key: NVIDIA_CHAT_MODEL
-        value: nvidia/nemotron-3-super-120b-a12b
-      - key: NVIDIA_DEEP_CHAT_MODEL
-        value: nvidia/nemotron-3-ultra-550b-a55b
-      - key: NVIDIA_MAX_TOKENS
+
+      # Internal generation gateway; URL includes /v1, token is GATEWAY_SERVICE_TOKEN.
+      - key: GENERATION_BASE_URL
+        sync: false
+      - key: GENERATION_API_KEY
+        sync: false
+      - key: GENERATION_TIMEOUT_SECONDS
+        value: "65"
+      - key: GENERATION_MAX_TOKENS
         value: "384"
 
       # Reranking is an optional extra and is not installed in the image; it

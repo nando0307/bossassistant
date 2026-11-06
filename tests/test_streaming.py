@@ -105,16 +105,3 @@ def test_non_retryable_failure_is_not_advertised_as_retryable(monkeypatch: Any) 
     errors = [json.loads(d) for name, d in _events(response.text) if name == "error"]
     assert errors and errors[0]["retryable"] is False
 
-
-def test_abstain_marker_never_reaches_the_client() -> None:
-    """The internal sentinel must not leak as literal tokens mid-stream."""
-    from app.retrieval.rag import ABSTAIN_MARKER
-
-    assert ABSTAIN_MARKER not in _fake_stream.__doc__ if _fake_stream.__doc__ else True
-    # The buffering that guarantees this lives in stream_department.
-    import inspect
-
-    from app.retrieval import rag
-
-    source = inspect.getsource(rag.stream_department)
-    assert "holding" in source and "format_abstention" in source

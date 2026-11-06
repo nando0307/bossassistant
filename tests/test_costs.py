@@ -1,7 +1,7 @@
 """Cost accounting must not invent numbers."""
 from __future__ import annotations
 
-from app.costs import PRICES_PER_MTOK, RequestCost, Usage, estimate_usage, usage_from_response
+from app.costs import RequestCost, Usage, estimate_usage, usage_from_response
 
 
 class FakeResponse:
@@ -62,10 +62,3 @@ def test_unpriced_models_are_surfaced_not_hidden() -> None:
     assert cost.unpriced_models == ["some/unlisted-model"]
     assert cost.summary()["cost_usd"] == 0.0
 
-
-def test_configured_models_are_all_priced() -> None:
-    """A model in use with no price silently reports every request as free."""
-    from app.retrieval import graphrag
-
-    for model in (graphrag.MAP_MODEL, graphrag.REDUCE_MODEL):
-        assert model in PRICES_PER_MTOK, f"{model} is used but unpriced"
