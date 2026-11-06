@@ -4,8 +4,8 @@
 
 BossAssistant is a deployed, access-controlled RAG assistant over a 77-document HR and
 Finance policy corpus. It started as a Colab prototype and is now a full-stack
-application: FastAPI backend, React/Vite frontend, Neo4j AuraDB retrieval, NVIDIA AI
-Endpoints, Docker, CI.
+application: FastAPI backend, React/Vite frontend, Neo4j AuraDB retrieval, NVIDIA
+embeddings, an authenticated generation gateway, Docker, CI.
 
 The part worth reading about is not that it retrieves documents. It is that **almost every
 claim in this document is a number produced by a harness in the repo**, including the ones
@@ -44,7 +44,7 @@ Router: HR / Finance / both / graph
     +-- graph retrieval   -> entity graph, 571 entities / 697 relationships
     |
     v
-NVIDIA LLM  <- retrieved text fenced as untrusted data
+Generation gateway  <- retrieved text fenced as untrusted data
 ```
 
 | Component | File |
@@ -216,11 +216,11 @@ the ACL filter — an unpartitioned semantic cache is a data-leak bug that nothi
 request path would notice.
 
 Streaming is the honest disappointment. It was built to cut perceived latency and mostly
-does not: the configured chat model is a reasoning model that thinks internally and then
-emits, so a long answer arrived as **one 1906-character event after nine seconds of
-silence**. Time-to-first-token turns out to be a property of the model (nemotron 3.18s vs
-mistral-nemotron 0.39s), not of the transport. The real win is sending sources before
-generation starts, which holds for any model.
+does not: the chat model configured at the time was a reasoning model that thought
+internally and then emitted, so a long answer arrived as **one 1906-character event after
+nine seconds of silence**. Time-to-first-token turns out to be a property of the model
+(nemotron 3.18s vs mistral-nemotron 0.39s), not of the transport. The real win is sending
+sources before generation starts, which holds for any model.
 
 ## Engineering lessons
 
@@ -254,9 +254,9 @@ generation starts, which holds for any model.
 
 ## Stack
 
-Python 3.12 · FastAPI · LangChain · Neo4j AuraDB · NVIDIA AI Endpoints · PyJWT · networkx ·
-React/Vite · Railway · Vercel · Docker · GitHub Actions · Langfuse · RAGAS · pytest ·
-ruff · mypy (132 tests, strict typing across `src`, `scripts`, and `tests`)
+Python 3.12 · FastAPI · LangChain · Neo4j AuraDB · NVIDIA embeddings · generation
+gateway · PyJWT · networkx · React/Vite · Vercel · Docker · GitHub Actions ·
+Langfuse · RAGAS · pytest · ruff · mypy (strict typing across `src`, `scripts`, and `tests`)
 
 ## Future work
 

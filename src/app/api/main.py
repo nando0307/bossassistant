@@ -187,7 +187,7 @@ def ask_stream(
 
 @app.on_event("startup")
 def _verify_auth_configuration() -> None:
-    """Refuse to serve restricted policy with auth on and no way to verify it."""
+    """Refuse to start without a way to verify tokens or reach online generation."""
     if settings.require_auth and settings.jwt_secret is None:
         raise RuntimeError(
             "REQUIRE_AUTH is true but JWT_SECRET is unset: every caller would be "
