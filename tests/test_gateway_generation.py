@@ -4,10 +4,12 @@ from __future__ import annotations
 import json
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
 import pytest
+import yaml
 from fastapi.testclient import TestClient
 from langchain_core.documents import Document
 from pydantic import SecretStr
@@ -66,11 +68,38 @@ def gateway(monkeypatch: Any) -> Any:
     rag.get_llm.cache_clear()
     try:
         yield state
+        for body in state["requests"]:
+            assert "tools" not in body
+            assert "tool_choice" not in body
     finally:
         rag.get_llm.cache_clear()
         server.shutdown()
         server.server_close()
         thread.join()
+
+
+def test_nightly_eval_supplies_gateway_configuration() -> None:
+    workflow = yaml.safe_load((Path(__file__).resolve().parents[1] / ".github/workflows/nightly-eval.yml").read_text())
+    env = workflow["jobs"]["eval"]["env"]
+    assert env["GENERATION_BASE_URL"] == "${{ vars.GENERATION_BASE_URL }}"
+    assert env["GENERATION_API_KEY"] == "${{ secrets.GENERATION_API_KEY }}"
+
+
+def test_mixed_generation_paths_reuse_model_clients(gateway: Any) -> None:
+    clients = (
+        rag.get_llm_for_mode("fast"), rag.get_llm_for_mode("deep"),
+        graphrag.get_map_llm(), graphrag.get_reduce_llm(),
+    )
+    for _ in range(2):
+        assert router.route_question("Synthetic zephyr procedure?") == "finance"
+        router.split_department_questions("PTO and travel allowances?")
+        router.rewrite_followup("What about contractors?", [{"role": "user", "content": "PTO?"}])
+        rag.generate_queries("PTO?")
+        current = (
+            rag.get_llm_for_mode("fast"), rag.get_llm_for_mode("deep"),
+            graphrag.get_map_llm(), graphrag.get_reduce_llm(),
+        )
+        assert all(actual is original for actual, original in zip(current, clients, strict=True))
 
 
 def events(response: Any) -> list[tuple[str, Any]]:

@@ -34,8 +34,8 @@ jobs:
       NEO4J_PASSWORD: ${{ secrets.NEO4J_PASSWORD }}
       NEO4J_DATABASE: ${{ secrets.NEO4J_DATABASE }}
       NVIDIA_API_KEY: ${{ secrets.NVIDIA_API_KEY }}
-      NVIDIA_CHAT_MODEL: ${{ vars.NVIDIA_CHAT_MODEL }}
-      NVIDIA_DEEP_CHAT_MODEL: ${{ vars.NVIDIA_DEEP_CHAT_MODEL }}
+      GENERATION_BASE_URL: ${{ vars.GENERATION_BASE_URL }}
+      GENERATION_API_KEY: ${{ secrets.GENERATION_API_KEY }}
       JWT_SECRET: ${{ secrets.JWT_SECRET }}
       REQUIRE_AUTH: "true"
       MODE: ${{ inputs.mode || 'fast' }}

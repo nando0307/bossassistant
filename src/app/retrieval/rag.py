@@ -127,7 +127,7 @@ def retryable_generation_error(exc: Exception) -> bool:
 
 
 @lru_cache(maxsize=4)
-def get_llm(model_name: str = "boss-default") -> ChatOpenAI:
+def get_llm(model_name: str) -> ChatOpenAI:
     if not settings.generation_base_url or not settings.generation_api_key:
         raise RuntimeError("GENERATION_BASE_URL and GENERATION_API_KEY are required for online generation")
     return ChatOpenAI(
@@ -198,7 +198,7 @@ def parse_queries(text: str) -> list[str]:
 
 
 def generate_queries(question: str) -> list[str]:
-    chain = ChatPromptTemplate.from_template(MULTI_QUERY_TEMPLATE) | get_llm() | StrOutputParser()
+    chain = ChatPromptTemplate.from_template(MULTI_QUERY_TEMPLATE) | get_llm("boss-default") | StrOutputParser()
     return parse_queries(
         chain.invoke(
             {"question": question},

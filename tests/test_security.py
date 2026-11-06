@@ -88,21 +88,6 @@ def test_format_docs_fences_and_neutralizes_retrieved_text() -> None:
     assert "15 days" in rendered
 
 
-def test_no_tool_calling_on_the_answer_path() -> None:
-    """Retrieved text must not be able to trigger an action, only text.
-
-    Asserted rather than assumed: the day someone binds a tool to the answering
-    chain, injected policy text becomes an action, and this test is the tripwire.
-    """
-    import inspect
-
-    from app.retrieval import rag
-
-    source = inspect.getsource(rag.answer_department)
-    for forbidden in ("bind_tools", "with_structured_output", ".tools", "ToolNode"):
-        assert forbidden not in source, f"answer path gained {forbidden}"
-
-
 # ── Abstention ───────────────────────────────────────────────────────
 
 
