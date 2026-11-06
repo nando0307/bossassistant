@@ -28,10 +28,10 @@ npm run preview
 - Demo identities come from `GET /auth/personas`; `POST /auth/demo` exchanges the selected identity for its token. Submission waits for discovery and the selected demo identity's token, including during access retries. Only a 404 confirms demo access is disabled; connection/server failures instead block submission and offer an access retry. A 401 requires renewed demo access or administrator assistance. This frontend does not add a production login or token-entry product.
 - Answers are held only in the current page's memory and disappear on reload. No chat persistence is added.
 
-Run the access-readiness regression check with Node 22.18+ from `frontend/`:
+Run the access-readiness regression check with Node 22.18+ from `frontend/`. CI runs it automatically as `npm test`; invoke it manually when changing the submission guard:
 
 ```sh
-node --test tests/access.test.ts
+npm test
 ```
 
 ## Accessibility and responsive behavior
