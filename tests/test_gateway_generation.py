@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -11,7 +12,9 @@ from fastapi.testclient import TestClient
 from langchain_core.documents import Document
 from pydantic import SecretStr
 
+from app.agents import router
 from app.api import main
+from app.cache import SemanticCache
 from app.config import settings
 from app.retrieval import graphrag, rag
 from tests.helpers import auth_headers
@@ -48,9 +51,11 @@ def gateway(monkeypatch: Any) -> Any:
                     self.wfile.write(b"data: [DONE]\n\n")
             else:
                 text = state["text"]
+                finish = state["finish"]
                 if body.get("response_format"):
-                    text = json.dumps({"department": state.get("route", "finance")})
-                self.wfile.write(json.dumps({"id": "test", "model": body["model"], "choices": [{"index": 0, "message": {"role": "assistant", "content": text}, "finish_reason": "stop"}]}).encode())
+                    text = json.dumps(state.get("structured", {"department": state.get("route", "finance")}))
+                    finish = "stop"
+                self.wfile.write(json.dumps({"id": "test", "model": body["model"], "choices": [{"index": 0, "message": {"role": "assistant", "content": text}, "finish_reason": finish}]}).encode())
 
     server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
@@ -127,3 +132,83 @@ def test_graph_uses_authorized_chunk_provenance_not_merged_descriptions(gateway:
     prompt = json.dumps(gateway["requests"][0]["messages"])
     assert "RESTRICTED_" not in prompt
     assert "Synthetic policy grants 15 days." in prompt
+
+
+@pytest.mark.parametrize("min_hits", [3, 4])
+def test_graph_counts_all_support_before_bounding_context(
+    gateway: Any, monkeypatch: Any, min_hits: int,
+) -> None:
+    """R2's worked example: only C has three entity hits, even in third position."""
+    rows = [
+        {"chunks": [{"source": source, "text": f"chunk {index} of {source}"} for source in sources]}
+        for index, sources in enumerate((("A", "B", "C"), ("D", "E", "C"), ("F", "G", "C")))
+    ]
+    rows[0]["chunks"].extend([rows[0]["chunks"][0]] * 3)
+    monkeypatch.setattr(graphrag, "connect", lambda: SimpleNamespace(query=lambda *a: rows))
+    result = graphrag.local_search("approval", min_entity_hits=min_hits, groups=frozenset({"all-employees"}))
+    assert "C" in result["sources"]
+    assert len(result["sources"]) == (1 if min_hits == 3 else 4)
+    assert [text for text in result["contexts"] if text.startswith("[C]")] == [
+        "[C]\nchunk 0 of C", "[C]\nchunk 1 of C",
+    ]
+    assert len(result["contexts"]) == len(set(result["contexts"]))
+    if min_hits == 3:
+        assert result["contexts"] == ["[C]\nchunk 0 of C", "[C]\nchunk 1 of C"]
+
+
+@pytest.mark.parametrize("finish", [None, "length", "content_filter", "stop"])
+@pytest.mark.parametrize("endpoint", ["/ask", "/ask/stream"])
+@pytest.mark.parametrize("payload", [
+    {"question": "PTO?", "department": "hr"},
+    {"question": "Travel?", "department": "finance", "mode": "deep"},
+    {"question": "PTO?"},
+    {"question": "PTO and travel allowances?"},
+    {"question": "PTO? Travel?"},
+    {"question": "PTO?", "mode": "graph"},
+])
+def test_final_answers_require_normal_completion_before_success_or_cache(
+    gateway: Any, monkeypatch: Any, finish: str | None, endpoint: str, payload: dict[str, str],
+) -> None:
+    """The public completion contract rejects partial answers on every answer route."""
+    gateway["finish"] = finish
+    cache = SemanticCache()
+    monkeypatch.setattr(settings, "enable_semantic_cache", True)
+    monkeypatch.setattr(router, "get_cache", lambda: cache)
+    monkeypatch.setattr(router, "get_embedder", lambda: SimpleNamespace(embed_query=lambda q: [1.0, 0.0]))
+    rows = [{"chunks": [{"source": "HR-SYNTHETIC", "text": "Synthetic policy grants 15 days."}]}]
+    monkeypatch.setattr(graphrag, "connect", lambda: SimpleNamespace(query=lambda *a: rows))
+    response = TestClient(main.app).post(endpoint, headers=auth_headers(), json=payload)
+    if finish != "stop":
+        assert cache.size() == 0
+        if endpoint == "/ask":
+            assert response.status_code == 503
+        else:
+            result = events(response)
+            assert all(name != "done" for name, _ in result)
+            assert result[-1][0] == "error" and result[-1][1]["retryable"] is True
+    else:
+        assert response.status_code == 200
+        if endpoint == "/ask":
+            assert gateway["text"] in response.json()["answer"]
+            assert cache.size() == 1
+        else:
+            result = events(response)
+            assert result[-1][0] == "done" and gateway["text"] in result[-1][1]
+
+
+@pytest.mark.parametrize("finish", [None, "length", "content_filter", "stop"])
+def test_global_graph_reduce_requires_normal_completion(
+    gateway: Any, monkeypatch: Any, finish: str | None,
+) -> None:
+    """Offline global reduction must not return an incomplete final answer either."""
+    gateway.update(finish=finish, structured={"points": [{"point": "15 days", "score": 100}]})
+    monkeypatch.setattr(graphrag, "connect", lambda: SimpleNamespace(query=lambda *a: [{"source": "HR-SYNTHETIC"}]))
+    monkeypatch.setattr(graphrag, "rank_communities", lambda *a: [{"id": "c1", "title": "PTO", "summary": "15 days"}])
+    if finish != "stop":
+        with pytest.raises(rag.GenerationInterruptedError):
+            graphrag.global_search("PTO?")
+    else:
+        result = graphrag.global_search("PTO?")
+        assert result["answer"] == gateway["text"]
+        assert result["sources"] == ["HR-SYNTHETIC"]
+    assert [request["model"] for request in gateway["requests"]] == ["boss-graph-map", "boss-graph-reduce"]

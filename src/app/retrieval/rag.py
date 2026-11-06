@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING, Any, Literal, cast
 from httpx import TransportError
 from langchain_core.documents import Document
 from langchain_core.load import dumps, loads
+from langchain_core.messages import BaseMessage
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_neo4j import Neo4jVector
@@ -100,6 +101,12 @@ INDEX_CONFIG: dict[Department, dict[str, str]] = {
 
 class GenerationInterruptedError(RuntimeError):
     """Generation ended without a complete answer."""
+
+
+def completed_answer(message: BaseMessage) -> str:
+    if message.response_metadata.get("finish_reason") != "stop":
+        raise GenerationInterruptedError("generation did not finish normally")
+    return StrOutputParser().invoke(message)
 
 
 def retryable_generation_error(exc: Exception) -> bool:
@@ -472,7 +479,7 @@ def answer_department(
             ", ".join(sorted({f"{f.source}:{f.pattern}" for f in findings})),
         )
     prompt = ChatPromptTemplate.from_template(RAG_TEMPLATE)
-    answer = (prompt | get_llm_for_mode(mode) | StrOutputParser()).invoke(
+    answer = (prompt | get_llm_for_mode(mode) | completed_answer).invoke(
         {
             "department": INDEX_CONFIG[department]["department_name"],
             "context": format_docs(docs),

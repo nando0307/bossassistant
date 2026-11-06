@@ -182,7 +182,7 @@ NEO4J_USER=
 NEO4J_PASSWORD=
 NEO4J_DATABASE=
 NVIDIA_API_KEY=
-# Internal gateway URL includes /v1; key matches its GATEWAY_SERVICE_TOKEN.
+# External gateway service URL includes /v1; key matches its GATEWAY_SERVICE_TOKEN.
 GENERATION_BASE_URL=http://127.0.0.1:8001/v1
 GENERATION_API_KEY=
 GENERATION_TIMEOUT_SECONDS=65
@@ -254,7 +254,7 @@ Department / graph router
 Retrieved text fenced as untrusted data (injection defence)
         |
         v
-Internal generation gateway --> Gemini -> OpenRouter -> Groq -> direct DeepSeek
+External multi-agent-gateway service (owns provider selection and fallback)
 ```
 
 Retrieval flow:
@@ -283,15 +283,24 @@ Routing behavior:
 
 Fast mode is the default for deployed latency. Use request-level `"mode": "deep"` for notebook-faithful multi-query retrieval experiments.
 
-Online generation uses the authenticated gateway's OpenAI-compatible
-`POST /v1/chat/completions` endpoint through `langchain-openai`. Boss keeps JWT
-authentication, department routing, retrieval, ACL filtering, citations, cache and
-abstention; the gateway does not run web research or agent tools on these requests.
+Boss is a client-only integration with an external authenticated generation
+service, not an implementation of provider fallback. The companion repository is
+`multi-agent-gateway`, branch `fm/gateway-fallback`, revision `06da79c`.
+Cross-application integration evidence is recorded in that companion repository
+at `data/boss-gateway/integration-final-source-results.json`.
+
+Online generation calls its OpenAI-compatible `POST /v1/chat/completions` endpoint
+through `langchain-openai`, using `Authorization: Bearer <GENERATION_API_KEY>`;
+this dedicated service token must match the companion's `GATEWAY_SERVICE_TOKEN`.
+Boss keeps JWT authentication, department routing, retrieval, ACL filtering,
+citations, cache and abstention. The companion's generation endpoint does not run
+web research or agent tools on these requests.
 
 Logical models are `boss-default` (routing, rewriting, query expansion and fast
 answers), `boss-deep` (deep answers), `boss-graph-map` (validated JSON-schema map
-output), and `boss-graph-reduce` (graph answers). The gateway owns physical model
-selection and ordered Gemini -> OpenRouter -> Groq -> direct DeepSeek fallback.
+output), and `boss-graph-reduce` (graph answers). Physical model selection and
+ordered Gemini -> OpenRouter -> Groq -> direct DeepSeek fallback are implemented
+and configured in the companion service, not in this repository.
 Default/deep output limits use `GENERATION_MAX_TOKENS` (384); graph calls retain
 1024 tokens. Routing uses validated JSON Schema, not NVIDIA schema-format retries.
 
@@ -341,9 +350,10 @@ LANGFUSE_HOST=https://cloud.langfuse.com
 select this repo. Render builds the Dockerfile, generates `JWT_SECRET` itself, and
 prompts for the values marked `sync: false`: Neo4j credentials, `NVIDIA_API_KEY`,
 the separate generation URL/token, `CORS_ORIGINS`, and optional Langfuse keys.
-Deploy the gateway separately on a private network or behind TLS; never expose its
-service token to the browser or substitute the user's JWT for it. Configure only
-the approved Gemini, OpenRouter, Groq and direct DeepSeek generation routes.
+Deploy the companion gateway service referenced above separately on a private
+network or behind TLS; this blueprint deploys only Boss. Never expose its service
+token to the browser or substitute the user's JWT for it. Configure the approved
+Gemini, OpenRouter, Groq and direct DeepSeek routes in the companion service.
 
 Then point the frontend at it: set `VITE_API_URL` in Vercel to the Render URL and
 redeploy, and make sure `CORS_ORIGINS` contains the Vercel origin with no trailing slash.

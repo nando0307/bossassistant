@@ -48,7 +48,8 @@ services:
       - key: NVIDIA_API_KEY
         sync: false
 
-      # Internal generation gateway; URL includes /v1, token is GATEWAY_SERVICE_TOKEN.
+      # External gateway service (see README companion reference); URL includes /v1.
+      # Bearer token is the companion's GATEWAY_SERVICE_TOKEN.
       - key: GENERATION_BASE_URL
         sync: false
       - key: GENERATION_API_KEY

@@ -27,7 +27,7 @@ from pydantic import BaseModel, Field
 
 from app.config import settings
 from app.observability import langchain_config
-from app.retrieval.rag import get_embedder, get_llm
+from app.retrieval.rag import completed_answer, get_embedder, get_llm
 from app.security import neutralize_delimiters, wrap_untrusted
 
 MAP_SYSTEM = """You are answering part of a question using one summary of a group of company policies.
@@ -228,13 +228,14 @@ def global_search(
             [("system", REDUCE_SYSTEM), ("human", "Question: {question}\n\nFindings:\n{findings}")]
         )
         | get_reduce_llm()
+        | completed_answer
     )
     answer = reduce_chain.invoke(
         {"question": question, "findings": findings},
         config=langchain_config("graphrag_reduce"),
     )
     return {
-        "answer": str(answer.content),
+        "answer": answer,
         "sources": community_sources(graph, contributing),
         "communities": contributing,
         # The findings the reduce step actually saw. Faithfulness must be judged
@@ -273,7 +274,7 @@ def local_search(
                OR any(g IN coalesce(chunk.acl_groups, []) WHERE g IN $groups))
         WITH node, collect(DISTINCT chunk) AS readable
         WHERE size(readable) > 0
-        RETURN [c IN readable | {source: c.source, text: c.text}][..2] AS chunks
+        RETURN [c IN readable | {source: c.source, text: c.text}] AS chunks
         """,
         {
             "query": _fulltext_query(question),
@@ -307,11 +308,13 @@ def local_search(
     # Shared entity/relationship descriptions have no source-level ACL provenance.
     # Use the graph only to locate readable chunks; never send merged text.
     seen: set[tuple[str, str]] = set()
+    chunk_counts: dict[str, int] = {}
     for row in rows:
         for chunk in row["chunks"]:
             source, text = chunk["source"], chunk["text"]
-            if source in sources and text and (source, text) not in seen:
+            if source in sources and text and (source, text) not in seen and chunk_counts.get(source, 0) < 2:
                 seen.add((source, text))
+                chunk_counts[source] = chunk_counts.get(source, 0) + 1
                 context_parts.append(f"[{source}]\n{text}")
     sources = {source for source, _ in seen}
 
@@ -320,13 +323,14 @@ def local_search(
             [("system", LOCAL_SYSTEM), ("human", "Question: {question}\n\nContext:\n{context}")]
         )
         | get_reduce_llm()
+        | completed_answer
     )
     answer = chain.invoke(
         {"question": question, "context": wrap_untrusted(neutralize_delimiters("\n\n".join(context_parts)))},
         config=langchain_config("graphrag_local"),
     )
     return {
-        "answer": str(answer.content),
+        "answer": answer,
         "sources": sorted(sources),
         "communities": [],
         "contexts": context_parts,
