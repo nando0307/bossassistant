@@ -12,7 +12,7 @@ cp .env.example .env.local
 npm run dev
 ```
 
-Set `VITE_API_URL` in `.env.local` to the backend origin (default: `http://127.0.0.1:8000`). This is a public build-time setting, not a place for secrets. The API must allow the frontend origin through CORS. Restart Vite after changing the environment.
+`.env.example` sets `VITE_API_URL` to the local backend origin (`http://127.0.0.1:8000`, the same value the code falls back to). Point it at the deployed API URL from the root README to test against the hosted backend. This is a public build-time setting, not a place for secrets. The API must allow the frontend origin through CORS. Restart Vite after changing the environment.
 
 ```sh
 npm run build
