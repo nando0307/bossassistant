@@ -14,9 +14,10 @@ Last updated: 2026-07-31
   `app.retrieval.rag` so index names cannot drift from query time. `--reset` guards the
   `DETACH DELETE`; re-running without it refuses rather than duplicating chunks.
   Ingested: 8 HR docs → 12 chunks, 8 Finance docs → 13 chunks.
-- **Chat model** set to `nvidia/nemotron-3-super-120b-a12b` in `.env`. The previous
-  default (`qwen/qwen3-next-80b-a3b-instruct`) hit NVIDIA end-of-life 2026-07-27 and
-  returns 410. **Railway still needs this env var set.**
+- **Online generation** runs through the external multi-agent gateway rather than a local
+  NVIDIA chat model, so `NVIDIA_CHAT_MODEL`/`NVIDIA_DEEP_CHAT_MODEL` no longer select it
+  (the old `qwen/qwen3-next-80b-a3b-instruct` default hit NVIDIA end-of-life and returns
+  410). See README "Environment Variables" for the authoritative settings.
 - **`/ask` gained `include_contexts`** (default off). Returns untruncated retrieved
   chunks for scoring; the 240-char `preview` in `sources` would score grounded answers
   as unfaithful.

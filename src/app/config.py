@@ -38,11 +38,14 @@ class Settings(BaseSettings):
     neo4j_password: SecretStr = Field(...)
     neo4j_database: str = Field(default="neo4j")
 
-    # --- NVIDIA AI Endpoints ---
+    # Embeddings and offline indexing/evaluation retain their NVIDIA credentials.
     nvidia_api_key: SecretStr = Field(...)
-    nvidia_chat_model: str = "qwen/qwen3-next-80b-a3b-instruct"
-    nvidia_deep_chat_model: str = "qwen/qwen3-next-80b-a3b-instruct"
-    nvidia_max_tokens: int = 384
+
+    # Online generation goes only to the authenticated internal gateway.
+    generation_base_url: str | None = None
+    generation_api_key: SecretStr | None = None
+    generation_timeout_seconds: float = Field(default=65.0, gt=0)
+    generation_max_tokens: int = Field(default=384, gt=0)
     enable_reranker: bool = False
 
     # --- LangSmith (optional, for tracing) ---

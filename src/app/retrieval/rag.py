@@ -6,13 +6,17 @@ from functools import lru_cache
 from collections.abc import Iterator
 from typing import TYPE_CHECKING, Any, Literal, cast
 
+from httpx import TransportError
 from langchain_core.documents import Document
 from langchain_core.load import dumps, loads
+from langchain_core.messages import BaseMessage
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_neo4j import Neo4jVector
 from langchain_neo4j.vectorstores.neo4j_vector import SearchType
-from langchain_nvidia_ai_endpoints import ChatNVIDIA, NVIDIAEmbeddings
+from langchain_nvidia_ai_endpoints import NVIDIAEmbeddings
+from langchain_openai import ChatOpenAI
+from openai import APIConnectionError, APIError, APIStatusError
 
 from app.config import settings
 from app.observability import langchain_config
@@ -95,27 +99,52 @@ INDEX_CONFIG: dict[Department, dict[str, str]] = {
 }
 
 
-def model_for_mode(mode: RetrievalMode) -> str:
-    """Graph mode never reaches here; it picks its own models in graphrag.py."""
-    if mode == "deep":
-        return settings.nvidia_deep_chat_model
-    return settings.nvidia_chat_model
+class GenerationInterruptedError(RuntimeError):
+    """Generation ended without a complete answer."""
 
 
-@lru_cache(maxsize=2)
-def get_llm(model_name: str | None = None) -> ChatNVIDIA:
-    return ChatNVIDIA(
-        model=model_name or settings.nvidia_chat_model,
-        nvidia_api_key=settings.nvidia_api_key.get_secret_value(),
+def completed_answer(message: BaseMessage) -> str:
+    if message.response_metadata.get("finish_reason") != "stop":
+        raise GenerationInterruptedError("generation did not finish normally")
+    return StrOutputParser().invoke(message)
+
+
+def retryable_generation_error(exc: Exception) -> bool:
+    if isinstance(exc, (GenerationInterruptedError, APIConnectionError, TransportError)):
+        return True
+    if isinstance(exc, APIError) and exc.code in {
+        "provider_configuration", "invalid_completion", "invalid_request", "generation_refused",
+    }:
+        return False
+    if isinstance(exc, APIStatusError):
+        return exc.status_code in {408, 429, 500, 502, 503, 504}
+    if isinstance(exc, APIError):
+        return exc.code in {"stream_interrupted", "providers_exhausted", "generation_deadline"}
+    # The independent NVIDIA embedding SDK still raises untyped exceptions.
+    return any(marker in str(exc) for marker in (
+        "[502]", "[503]", "[504]", "ResourceExhausted", "Too Many Requests",
+    ))
+
+
+@lru_cache(maxsize=4)
+def get_llm(model_name: str) -> ChatOpenAI:
+    if not settings.generation_base_url or not settings.generation_api_key:
+        raise RuntimeError("GENERATION_BASE_URL and GENERATION_API_KEY are required for online generation")
+    return ChatOpenAI(
+        model=model_name,
+        base_url=settings.generation_base_url,
+        api_key=settings.generation_api_key,
         temperature=0,
-        max_completion_tokens=settings.nvidia_max_tokens,
+        max_completion_tokens=1024 if model_name.startswith("boss-graph-") else settings.generation_max_tokens,
+        timeout=settings.generation_timeout_seconds,
+        max_retries=0,
+        stream_usage=False,
+        use_responses_api=False,
     )
 
 
-def get_llm_for_mode(mode: RetrievalMode) -> ChatNVIDIA:
-    if mode == "deep":
-        return get_llm(settings.nvidia_deep_chat_model)
-    return get_llm()
+def get_llm_for_mode(mode: RetrievalMode) -> ChatOpenAI:
+    return get_llm("boss-deep" if mode == "deep" else "boss-default")
 
 
 @lru_cache(maxsize=1)
@@ -169,7 +198,7 @@ def parse_queries(text: str) -> list[str]:
 
 
 def generate_queries(question: str) -> list[str]:
-    chain = ChatPromptTemplate.from_template(MULTI_QUERY_TEMPLATE) | get_llm() | StrOutputParser()
+    chain = ChatPromptTemplate.from_template(MULTI_QUERY_TEMPLATE) | get_llm("boss-default") | StrOutputParser()
     return parse_queries(
         chain.invoke(
             {"question": question},
@@ -355,7 +384,7 @@ def format_abstention(docs: list[Document]) -> str:
 
 def _build_answer_chain(question: str, department: Department, docs: list[Document], mode: RetrievalMode) -> Any:
     prompt = ChatPromptTemplate.from_template(RAG_TEMPLATE)
-    return (prompt | get_llm_for_mode(mode) | StrOutputParser()), {
+    return (prompt | get_llm_for_mode(mode)), {
         "department": INDEX_CONFIG[department]["department_name"],
         "context": format_docs(docs),
         "question": question,
@@ -387,31 +416,42 @@ def stream_department(
     chain, payload = _build_answer_chain(question, department, docs, mode)
     buffer = ""
     holding = True
+    abstained = False
+    finished = False
     emitted: list[str] = []
-    for chunk in chain.stream(payload, config=langchain_config("department_answer_stream")):
-        if not chunk:
+    for message in chain.stream(payload, config=langchain_config("department_answer_stream")):
+        reason = message.response_metadata.get("finish_reason")
+        if reason:
+            if reason != "stop":
+                raise GenerationInterruptedError("generation did not finish normally")
+            finished = True
+        chunk = message.content
+        if not chunk or abstained:
             continue
         if holding:
             buffer += chunk
             if ABSTAIN_MARKER.startswith(buffer.strip()[: len(ABSTAIN_MARKER)]) and len(
                 buffer.strip()
             ) < len(ABSTAIN_MARKER):
-                continue  # still could become the marker
+                continue
             holding = False
             if ABSTAIN_MARKER in buffer:
-                message = format_abstention(docs)
-                yield "token", message
-                yield "done", message
-                return
+                abstained = True
+                continue  # Drain and validate completion before declaring abstention.
             emitted.append(buffer)
             yield "token", buffer
             continue
         emitted.append(chunk)
         yield "token", chunk
 
+    if not finished:
+        raise GenerationInterruptedError("generation stream ended before completion")
     answer = "".join(emitted) or buffer
     if is_abstention(answer):
         answer = format_abstention(docs)
+        yield "token", answer
+    elif holding and buffer:
+        yield "token", buffer
     yield "done", answer
 
 
@@ -439,7 +479,7 @@ def answer_department(
             ", ".join(sorted({f"{f.source}:{f.pattern}" for f in findings})),
         )
     prompt = ChatPromptTemplate.from_template(RAG_TEMPLATE)
-    answer = (prompt | get_llm_for_mode(mode) | StrOutputParser()).invoke(
+    answer = (prompt | get_llm_for_mode(mode) | completed_answer).invoke(
         {
             "department": INDEX_CONFIG[department]["department_name"],
             "context": format_docs(docs),

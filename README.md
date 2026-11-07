@@ -182,10 +182,11 @@ NEO4J_USER=
 NEO4J_PASSWORD=
 NEO4J_DATABASE=
 NVIDIA_API_KEY=
-# qwen/qwen3-next-80b-a3b-instruct reached NVIDIA end-of-life and now returns 410.
-NVIDIA_CHAT_MODEL=nvidia/nemotron-3-super-120b-a12b
-NVIDIA_DEEP_CHAT_MODEL=nvidia/nemotron-3-ultra-550b-a55b
-NVIDIA_MAX_TOKENS=384
+# External gateway service URL includes /v1; key matches its GATEWAY_SERVICE_TOKEN.
+GENERATION_BASE_URL=http://127.0.0.1:8001/v1
+GENERATION_API_KEY=
+GENERATION_TIMEOUT_SECONDS=65
+GENERATION_MAX_TOKENS=384
 
 # --- Auth. Retrieval is ACL-filtered, so these are not optional. ---
 # The app refuses to start with REQUIRE_AUTH=true and no JWT_SECRET rather than
@@ -212,6 +213,11 @@ LOG_LEVEL=
 CORS_ORIGINS=
 ENABLE_RERANKER=false
 ```
+
+The API refuses startup without both generation settings. Offline ingestion,
+graph indexing and evaluation imports do not require them. Configure the gateway
+before restarting Boss; the old NVIDIA chat model variables no longer select
+online generation.
 
 Frontend variables:
 
@@ -242,13 +248,13 @@ Department / graph router
         |                                                           +--> ACL filter (post-ANN)
         +--> Finance retriever --> Neo4j fin_vector + fin_keyword  /       + supersession drop
         |
-        +--> GraphRAG local/global search --> entity graph
+        +--> GraphRAG local search --> entity graph --> authorized source chunks
         |
         v
 Retrieved text fenced as untrusted data (injection defence)
         |
         v
-NVIDIA LLM answer generation, or abstention
+External multi-agent-gateway service (owns provider selection and fallback)
 ```
 
 Retrieval flow:
@@ -277,17 +283,48 @@ Routing behavior:
 
 Fast mode is the default for deployed latency. Use request-level `"mode": "deep"` for notebook-faithful multi-query retrieval experiments.
 
-`NVIDIA_CHAT_MODEL` controls fast/default answer generation, routing, and multi-query
-generation. `NVIDIA_DEEP_CHAT_MODEL` controls deep-mode answer generation.
+Boss is a client-only integration with an external authenticated generation
+service, not an implementation of provider fallback. The companion repository is
+`multi-agent-gateway`, branch `fm/gateway-fallback`, revision `06da79c`.
+Cross-application integration evidence is recorded in that companion repository
+at `data/boss-gateway/integration-final-source-results.json`.
 
-Two measured constraints on model choice:
+Online generation calls its OpenAI-compatible `POST /v1/chat/completions` endpoint
+through `langchain-openai`, using `Authorization: Bearer <GENERATION_API_KEY>`;
+this dedicated service token must match the companion's `GATEWAY_SERVICE_TOKEN`.
+Boss keeps JWT authentication, department routing, retrieval, ACL filtering,
+citations, cache and abstention. The companion's generation endpoint does not run
+web research or agent tools on these requests.
 
-- The configured chat model is a **reasoning** model. Its thinking trace breaks
-  LangChain's `with_structured_output`, which is why graph extraction, the GraphRAG map
-  step, and RAGAS scoring each pin a non-reasoning model instead.
-- It also emits its whole answer after thinking rather than incrementally, so
-  time-to-first-token is ~3.2s versus ~0.4s for `mistralai/mistral-nemotron`. That is
-  why SSE streaming buys little here — see `docs/portfolio.md`.
+Logical models are `boss-default` (routing, rewriting, query expansion and fast
+answers), `boss-deep` (deep answers), `boss-graph-map` (validated JSON-schema map
+output), and `boss-graph-reduce` (graph answers). Physical model selection and
+ordered Gemini -> OpenRouter -> Groq -> direct DeepSeek fallback are implemented
+and configured in the companion service, not in this repository.
+Default/deep output limits use `GENERATION_MAX_TOKENS` (384); graph calls retain
+1024 tokens. Routing uses validated JSON Schema, not NVIDIA schema-format retries.
+
+Each generation call has the gateway's total budget (60 seconds by default), not
+one full budget per provider. Boss sets SDK retries to zero and a 65-second
+transport timeout. If the gateway budget changes, set `GENERATION_TIMEOUT_SECONDS`
+above it. A deep or multi-department question can make several generation calls,
+so this is not a total `/ask` deadline. Exhaustion or a transport outage returns
+HTTP 503; streaming sends `error` with `retryable:true`. After partial output,
+never append a backup answer: discard the partial answer before retrying.
+Boss requires a normal completion marker before `done`, including abstentions.
+
+Graph retrieval uses entities to find ACL-readable, non-superseded source chunks.
+Only those chunks and their source IDs enter the local graph prompt and contexts.
+Globally merged entity/relationship descriptions have no per-source authorization
+provenance and are omitted. Global community search still rejects ACL-scoped calls.
+
+Embeddings stay on NVIDIA `nvidia/nv-embedqa-e5-v5` in the existing 1024-dimensional
+index space. Do not redirect `NVIDIA_BASE_URL` or reuse `NVIDIA_API_KEY` for the
+generation gateway. Offline `scripts/graph_index.py` extraction/summarization and
+`scripts/run_eval.py` RAGAS judges remain direct NVIDIA jobs with their existing
+model arguments; they do not require gateway settings. Offline code invoking the
+shared graph query functions does use the new map/reduce gateway aliases.
+Provider fallback does not cover NVIDIA embedding or Neo4j outages.
 
 When Langfuse is enabled, BossAssistant traces key LangChain runs:
 
@@ -311,8 +348,12 @@ LANGFUSE_HOST=https://cloud.langfuse.com
 
 `render.yaml` describes the service. In the Render dashboard: **New → Blueprint →**
 select this repo. Render builds the Dockerfile, generates `JWT_SECRET` itself, and
-prompts for the eight values marked `sync: false` (Neo4j credentials, `NVIDIA_API_KEY`,
-`CORS_ORIGINS`, and the optional Langfuse keys).
+prompts for the values marked `sync: false`: Neo4j credentials, `NVIDIA_API_KEY`,
+the separate generation URL/token, `CORS_ORIGINS`, and optional Langfuse keys.
+Deploy the companion gateway service referenced above separately on a private
+network or behind TLS; this blueprint deploys only Boss. Never expose its service
+token to the browser or substitute the user's JWT for it. Configure the approved
+Gemini, OpenRouter, Groq and direct DeepSeek routes in the companion service.
 
 Then point the frontend at it: set `VITE_API_URL` in Vercel to the Render URL and
 redeploy, and make sure `CORS_ORIGINS` contains the Vercel origin with no trailing slash.
@@ -360,8 +401,7 @@ Production defaults to a low-latency path so the deployed app stays usable:
 
 ```env
 ENABLE_RERANKER=false
-NVIDIA_CHAT_MODEL=nvidia/nemotron-3-super-120b-a12b
-NVIDIA_DEEP_CHAT_MODEL=nvidia/nemotron-3-ultra-550b-a55b
+GENERATION_MAX_TOKENS=384
 ```
 
 Current mode behavior:
@@ -369,7 +409,7 @@ Current mode behavior:
 - Use `"fast"` for the default deployed UI.
 - Use `"deep"` for RAGAS evaluation and portfolio writeups.
 - In `"deep"` mode, multi-query retrieval is enabled for that request.
-- In `"deep"` mode, BossAssistant uses `NVIDIA_DEEP_CHAT_MODEL` for final answer generation.
+- In `"deep"` mode, BossAssistant uses the `boss-deep` gateway alias for final answers.
 - Reranking runs in `"deep"` mode when `ENABLE_RERANKER=true`.
 - Replace the local `BAAI/bge-reranker-large` cross-encoder with a hosted reranker before making deep mode production-default.
 

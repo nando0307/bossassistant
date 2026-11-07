@@ -25,7 +25,7 @@ from app.agents.router import answer_question, stream_question
 from app.auth import DEMO_PERSONAS, Principal, get_principal, issue_demo_token
 from app.config import settings
 from app.db import verify_connectivity
-from app.retrieval.rag import RetrievalMode  # single definition; a local copy silently drifted
+from app.retrieval.rag import RetrievalMode, retryable_generation_error
 
 app = FastAPI(
     title="BossAssistant API",
@@ -91,14 +91,6 @@ def ready(response: Response) -> dict[str, str]:
         return {"status": "ready", "neo4j": "ok"}
     response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE
     return {"status": "not_ready", "neo4j": "down"}
-
-
-#: Upstream inference failures that a caller should retry rather than treat as a
-#: bug in this service. NVIDIA returns "ResourceExhausted: Worker local total
-#: request limit reached (107/32)" and bare 502s under sustained load; surfacing
-#: those as 500 told every client the request was malformed and defeated retry
-#: logic, costing whole eval runs.
-_UPSTREAM_RETRYABLE = ("[502]", "[503]", "[504]", "ResourceExhausted", "Too Many Requests")
 
 
 class DemoTokenRequest(BaseModel):
@@ -170,8 +162,7 @@ def ask_stream(
             ):
                 yield _sse(event, data)
         except Exception as exc:  # noqa: BLE001 - must reach the client as an event
-            message = str(exc)
-            retryable = any(marker in message for marker in _UPSTREAM_RETRYABLE)
+            retryable = retryable_generation_error(exc)
             yield _sse(
                 "error",
                 {
@@ -196,13 +187,15 @@ def ask_stream(
 
 @app.on_event("startup")
 def _verify_auth_configuration() -> None:
-    """Refuse to serve restricted policy with auth on and no way to verify it."""
+    """Refuse to start without a way to verify tokens or reach online generation."""
     if settings.require_auth and settings.jwt_secret is None:
         raise RuntimeError(
             "REQUIRE_AUTH is true but JWT_SECRET is unset: every caller would be "
             "rejected. Set JWT_SECRET, or set REQUIRE_AUTH=false to run "
             "unauthenticated with all-employees access only."
         )
+    if not settings.generation_base_url or not settings.generation_api_key:
+        raise RuntimeError("GENERATION_BASE_URL and GENERATION_API_KEY are required for online generation")
 
 
 @app.post("/ask", response_model=AskResponse)
@@ -225,8 +218,7 @@ def ask(
             history=request.history,
         )
     except Exception as exc:  # noqa: BLE001 - provider raises bare Exception
-        message = str(exc)
-        if any(marker in message for marker in _UPSTREAM_RETRYABLE):
+        if retryable_generation_error(exc):
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
                 detail="upstream inference provider unavailable; retry",

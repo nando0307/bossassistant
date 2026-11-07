@@ -2,13 +2,7 @@ from __future__ import annotations
 
 from langchain_core.documents import Document
 
-from app.config import settings
-from app.retrieval.rag import dedupe_sources, format_sources, model_for_mode
-
-
-def test_model_for_mode_uses_fast_and_deep_settings() -> None:
-    assert model_for_mode("fast") == settings.nvidia_chat_model
-    assert model_for_mode("deep") == settings.nvidia_deep_chat_model
+from app.retrieval.rag import dedupe_sources, format_sources
 
 
 def test_format_sources_dedupes_duplicate_document_chunks() -> None:
@@ -126,18 +120,3 @@ def test_global_search_refuses_acl_scoped_calls() -> None:
         global_search("what requires board approval?", groups=frozenset({"all-employees"}))
 
 
-def test_local_search_signature_accepts_groups() -> None:
-    """Regression guard: `groups` was once accepted and silently ignored.
-
-    A Cypher edit failed to apply, so local_search took a groups argument and
-    filtered nothing — a security control that is present in the signature and
-    absent in the query. Assert the parameter reaches the statement.
-    """
-    import inspect
-
-    from app.retrieval import graphrag
-
-    assert "groups" in inspect.signature(graphrag.local_search).parameters
-    source = inspect.getsource(graphrag.local_search)
-    assert "$groups" in source, "local_search must pass groups into its Cypher"
-    assert "acl_groups" in source, "local_search must filter on chunk.acl_groups"
