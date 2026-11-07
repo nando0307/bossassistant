@@ -226,7 +226,7 @@ def score_with_ragas(
         ResponseRelevancy compares the original question against questions it
         generated back from the answer — but it embeds the first with
         `embed_query` and the rest with `embed_documents`. On an asymmetric
-        query/passage model (`nv-embedqa-e5-v5`) that scores two paraphrases of
+        query/passage model (`llama-nemotron-embed-vl-1b-v2`) that scores two paraphrases of
         the same question as unrelated, which is how a passing answer lands at
         0.0. Both sides are questions, so both take the query encoder.
 
@@ -338,7 +338,7 @@ def main() -> None:
     # and scores a case in ~10s, which is what turned faithfulness from
     # unmeasurable into a routine part of the run.
     parser.add_argument("--ragas-model", default="meta/llama-3.1-8b-instruct")
-    parser.add_argument("--ragas-embed-model", default="nvidia/nv-embedqa-e5-v5")
+    parser.add_argument("--ragas-embed-model", default="nvidia/llama-nemotron-embed-vl-1b-v2")
     parser.add_argument(
         "--token",
         default=None,

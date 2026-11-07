@@ -147,12 +147,27 @@ def get_llm_for_mode(mode: RetrievalMode) -> ChatOpenAI:
     return get_llm("boss-deep" if mode == "deep" else "boss-default")
 
 
+#: Vector width of every chunk and community index. The embedder is asked for
+#: this width explicitly; both ingestion and query time go through `get_embedder`,
+#: so the index and the model cannot drift apart.
+EMBEDDING_DIMENSIONS = 1024
+
+
 @lru_cache(maxsize=1)
 def get_embedder() -> NVIDIAEmbeddings:
+    # Model history matters here. nvidia/nv-embedqa-e5-v5 was retired with 410
+    # Gone on 2026-08-25, and so was its documented replacement
+    # nvidia/llama-3.2-nv-embedqa-1b-v2 (retired 2026-05-18). The text-only
+    # nemotron-3.5-embed-1b/8b deployments accept the API key but return 500
+    # "service inference failed" for any request carrying more than roughly one
+    # 500-character chunk, which breaks batched ingestion. The VL 1B model is
+    # the live deployment that accepts batches and supports 1024-dimension
+    # output (native 2048).
     return NVIDIAEmbeddings(
-        model="nvidia/nv-embedqa-e5-v5",
+        model="nvidia/llama-nemotron-embed-vl-1b-v2",
         nvidia_api_key=settings.nvidia_api_key.get_secret_value(),
         truncate="END",
+        dimensions=EMBEDDING_DIMENSIONS,
     )
 
 
