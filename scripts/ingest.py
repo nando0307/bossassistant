@@ -37,11 +37,11 @@ from langchain_text_splitters import RecursiveCharacterTextSplitter
 
 from app.config import settings
 from app.corpus import DOCUMENTS
-from app.retrieval.rag import INDEX_CONFIG, Department, get_embedder
+from app.retrieval.rag import EMBEDDING_DIMENSIONS, INDEX_CONFIG, Department, get_embedder
 
-#: nv-embedqa-e5-v5. Declared here because the vector index must be created with
-#: the right width before any node is written.
-EMBEDDING_DIMENSIONS = 1024
+#: Declared here because the vector index must be created with the right width
+#: before any node is written. The width itself lives next to `get_embedder`,
+#: which requests exactly this many dimensions from the model.
 
 
 @dataclass(frozen=True)

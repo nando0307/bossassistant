@@ -318,12 +318,13 @@ Only those chunks and their source IDs enter the local graph prompt and contexts
 Globally merged entity/relationship descriptions have no per-source authorization
 provenance and are omitted. Global community search still rejects ACL-scoped calls.
 
-Embeddings stay on NVIDIA `nvidia/nv-embedqa-e5-v5` in the existing 1024-dimensional
-index space. Do not redirect `NVIDIA_BASE_URL` or reuse `NVIDIA_API_KEY` for the
-generation gateway. Offline `scripts/graph_index.py` extraction/summarization and
-`scripts/run_eval.py` RAGAS judges remain direct NVIDIA jobs with their existing
-model arguments; they do not require gateway settings. Offline code invoking the
-shared graph query functions does use the new map/reduce gateway aliases.
+Embeddings stay on NVIDIA `nvidia/llama-nemotron-embed-vl-1b-v2`, requested at
+1024 output dimensions so the existing index space is unchanged. Do not redirect
+`NVIDIA_BASE_URL` or reuse `NVIDIA_API_KEY` for the generation gateway. Offline
+`scripts/graph_index.py` extraction/summarization and `scripts/run_eval.py` RAGAS
+judges remain direct NVIDIA jobs with their existing model arguments; they do
+not require gateway settings. Offline code invoking the shared graph query
+functions does use the new map/reduce gateway aliases.
 Provider fallback does not cover NVIDIA embedding or Neo4j outages.
 
 When Langfuse is enabled, BossAssistant traces key LangChain runs:

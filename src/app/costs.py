@@ -28,7 +28,6 @@ PRICES_PER_MTOK: dict[str, tuple[float, float]] = {
     "mistralai/mistral-nemotron": (0.15, 0.60),
     "meta/llama-3.1-8b-instruct": (0.05, 0.10),
     "meta/llama-3.3-70b-instruct": (0.35, 0.70),
-    "nvidia/nv-embedqa-e5-v5": (0.02, 0.0),
 }
 
 #: Rough bytes-per-token for English prose, used only when the provider omits
