@@ -99,17 +99,23 @@ Return only JSON with this exact shape:
 
 HR_TERMS = {
     "benefit",
+    "conference",
     "conduct",
+    "dental",
+    "degree",
     "harassment",
     "health",
     "hr",
+    "l&d",
     "leave",
     "onboarding",
     "parental",
     "performance",
     "pto",
     "remote",
+    "tuition",
     "vacation",
+    "vision",
     "wellness",
 }
 
@@ -121,12 +127,14 @@ FINANCE_TERMS = {
     "card",
     "expense",
     "finance",
+    "flight",
     "hotel",
     "invoice",
     "payment",
     "per diem",
     "procurement",
     "purchase",
+    "rental car",
     "reimbursement",
     "travel",
 }
@@ -199,6 +207,8 @@ def split_user_questions(question: str) -> list[str]:
 def route_question_fast(question: str) -> Literal["hr", "finance", "both"] | None:
     has_hr = _contains_any(question, HR_TERMS)
     has_finance = _contains_any(question, FINANCE_TERMS)
+    if _contains_any(question, {"degree", "l&d", "learning and development", "tuition"}):
+        return "hr"
 
     if has_hr and has_finance:
         return "both"

@@ -104,6 +104,13 @@ def test_fast_router_detects_finance_terms() -> None:
     assert route_question_fast("Can I get reimbursement for this?") == "finance"
 
 
+def test_fast_router_routes_policy_topics_despite_lexical_collisions() -> None:
+    assert route_question_fast("What is my annual L&D budget?") == "hr"
+    assert route_question_fast("How much tuition reimbursement can I claim?") == "hr"
+    assert route_question_fast("What class of rental car can I book?") == "finance"
+    assert route_question_fast("Do I need approval to attend a conference that requires travel?") == "both"
+
+
 # ── is_vague_subquestion ─────────────────────────────────────────────
 
 
