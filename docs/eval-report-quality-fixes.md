@@ -18,11 +18,13 @@ live run) to 75/75. Raw result rows and credentials stay out of the repository.
 
 ## Recovered vs newly failing
 
-The frozen baseline's 11 failures are `finance_international_per_diem`,
-`hr_review_self_assessment`, `hr_ld_budget_wording`, `hr_tuition_reimbursement`,
-`hr_tuition_clawback`, `fin_expense_deadline`, `fin_domestic_meal_per_diem`,
-`fin_external_auditor`, `both_conference_travel_approval`,
-`both_new_hire_first_trip` and `adversarial_pto_inflation`.
+The frozen baseline's 11 failures, per the `passed: false` cases in
+`evals/baseline_fast.json`, are `finance_international_per_diem`,
+`hr_ld_budget_wording`, `hr_tuition_reimbursement`, `hr_tuition_clawback`,
+`fin_expense_deadline`, `fin_domestic_meal_per_diem`,
+`fin_card_reconciliation_due`, `fin_external_auditor`,
+`both_conference_travel_approval`, `both_new_hire_first_trip` and
+`both_home_office_stipend_claim`.
 
 The recorded rerun passes 63/75, i.e. 12 failing cases. Its per-case rows are not
 committed, so which baseline failures recovered and which case newly failed
@@ -30,6 +32,14 @@ cannot be read from this repository, and because the model route and cache setti
 differ from the baseline, the 64 → 63 movement is not attributed to this change
 here. Reproducing the run with the commands below and diffing per-case `passed`
 is what closes that gap.
+
+The tracked raw run `evals/results_fast.jsonl` is not a substitute: it disagrees
+with the frozen baseline on four cases (`hr_review_self_assessment` and
+`adversarial_pto_inflation` pass in the baseline and fail in the raw file;
+`fin_card_reconciliation_due` and `both_home_office_stipend_claim` the reverse),
+so the two repository artifacts are not interchangeable. In that raw file the
+`hr_review_self_assessment` failure is a generation corrupted into repeated
+`<unk>` tokens, not a policy or routing defect.
 
 ## What is evidenced
 
@@ -57,22 +67,23 @@ is what closes that gap.
   figure is answered but `FIN-001` loses the top-k slot to `FIN-002`/`FIN-010`.
 - `both_new_hire_first_trip` — routing is correct; `FIN-001` is missing.
 - `hr_tuition_clawback` — answers the clawback but omits the 12-month window.
-- `hr_review_self_assessment` — the response arrived as repeated `<unk>` tokens,
-  i.e. a corrupted generation from the gateway, not a policy or routing defect.
-- `fin_expense_deadline`, `adversarial_pto_inflation` — addressed by the
-  abstention prompt change; whether they now pass is not evidenced by the
+- `fin_expense_deadline` — abstained although `FIN-001` was retrieved; targeted by
+  the abstention prompt change, but whether it now passes is not evidenced by the
   aggregates above.
+- `fin_card_reconciliation_due`, `both_home_office_stipend_claim` — quality match
+  false in the frozen baseline, untouched by any changed line; the repository
+  does not record why they failed there.
 
 ## Reproducing the comparison
 
-Run the unchanged suite against a freshly written result file, then gate it:
+Run the unchanged suite against a fresh result file, then gate it:
 
 ```
-uv run python scripts/run_eval.py --api-url http://127.0.0.1:8000 --token "$TOKEN" --output evals/results_fast.jsonl
-uv run python scripts/eval_gate.py check evals/results_fast.jsonl --baseline evals/baseline_fast.json
+uv run python scripts/run_eval.py --api-url http://127.0.0.1:8000 --token "$TOKEN"
+uv run python scripts/eval_gate.py check evals/results.jsonl --baseline evals/baseline_fast.json
 ```
 
-Diff the per-case `passed`/`abstained`/`department_actual` fields against the
-failing-case list above. Note that `scripts/run_eval.py` defaults to
-`evals/results.jsonl`; without `--output` the gate compares the frozen baseline
-against itself and passes trivially.
+`evals/results.jsonl` is the harness default and is gitignored, so a fresh run
+never overwrites the tracked `evals/results_fast.jsonl` that the frozen baseline
+was derived from. Diff the per-case `passed`/`abstained`/`department_actual`
+fields against the failing-case list above.
