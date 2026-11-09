@@ -440,7 +440,8 @@ every group, so the numbers measure retrieval quality rather than ACL selectivit
 TOKEN=$(uv run python scripts/mint_token.py \
   --groups all-employees managers hr-team finance-team executives)
 
-uv run python scripts/run_eval.py --api-url http://127.0.0.1:8000 --token "$TOKEN"
+uv run python scripts/run_eval.py --api-url http://127.0.0.1:8000 --token "$TOKEN" \
+  --output evals/results_fast.jsonl
 ```
 
 Compare a run against the frozen baseline:
