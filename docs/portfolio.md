@@ -187,9 +187,12 @@ PASSED: retrieved the hostile document and ignored its instructions
 
 **Abstention** is scored as its own metric, because a system that abstains on everything is
 perfectly faithful and useless: **recall 1.000, precision 0.286**. It refuses when it
-should, and over-refuses five times — two of which are correct behaviour given a known
-routing defect, and three of which are genuine over-caution. Not yet tuned, because
-softening trades precision for recall and one run cannot locate the optimum.
+should, and over-refuses five times — two of which were correct behaviour given the keyword
+mis-routes, and three of which are genuine over-caution. Both causes have since been
+addressed: `conference`, `degree`, `l&d` and `tuition` now route HR, and the answer prompt
+tells the model to state the policy's actual value instead of abstaining when the user's
+premise conflicts with it (`src/app/retrieval/rag.py`). The recall and precision figures
+above predate both changes and have not been re-measured.
 
 ## Ingestion that survives a changing corpus
 
@@ -265,5 +268,7 @@ Langfuse · RAGAS · pytest · ruff · mypy (strict typing across `src`, `script
   into the eval suite — the difference between an eval suite and an eval process
 - Layout-aware parsing of real PDFs; the corpus is clean synthetic prose and does not
   exercise tables or multi-column layout
-- Fix the two keyword mis-routes that a semantic router would arbitrate correctly
+- Semantic arbitration for mixed benefit/budget wording: the fast router still answers
+  HR alone when the only Finance signal in a question is `budget` or `reimbursement`
+  (see `docs/eval-report-quality-fixes.md`)
 - Shared cache (Redis) so hit rate survives multiple workers

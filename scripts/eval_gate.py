@@ -1,7 +1,7 @@
 """Compare an eval run against a frozen baseline, and fail only on real regressions.
 
     uv run python scripts/eval_gate.py freeze evals/results_fast.jsonl --output evals/baseline_fast.json
-    uv run python scripts/eval_gate.py check  evals/results_fast.jsonl --baseline evals/baseline_fast.json
+    uv run python scripts/eval_gate.py check  evals/results.jsonl --baseline evals/baseline_fast.json
 
 **Why not "fail if pass rate drops 5%".** At n=75 a single case is 1.3 points, so a
 5-point threshold fires on 4 cases flipping — which is well inside the run-to-run noise

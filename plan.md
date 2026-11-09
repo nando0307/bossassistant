@@ -103,11 +103,13 @@ contain the right keywords.
    information": "What is my annual L&D budget?" (budget → Finance, answer lives in
    HR-007) and "How much tuition reimbursement can I claim?" (reimbursement → Finance,
    also HR-007). Encoded as `hr_ld_budget_wording` and `hr_tuition_reimbursement`.
-   No keyword list fixes this — it needs the semantic router to arbitrate.
+   *(fixed — see `docs/eval-report-quality-fixes.md`; a question whose only Finance word
+   is `budget` or `reimbursement` still routes HR alone, and that residual is accepted)*
 2. **Cross-department questions answer from one side.** `both_conference_travel_approval`
    ("Do I need approval to attend a conference that requires travel?") routes to Finance
    and returns the manager-approval travel rule, missing HR-007's requirement of VP
    approval for conference travel. Retrieval never sees the HR document.
+   *(fixed — `conference` is now an HR term, so the question routes `both`)*
 3. **Upstream provider errors surface as HTTP 500.** *(fixed — see Next steps 4)* NVIDIA returns
    `503 ResourceExhausted: Worker local total request limit reached (107/32)` and
    `502 Bad Gateway` under sustained load; the API masks both as 500. The eval client
@@ -787,7 +789,7 @@ uv run python scripts/ingest.py
 
 # Functional eval, 75 cases (~5 min)
 uv run python scripts/run_eval.py --api-url http://127.0.0.1:8010 --mode fast \
-  --timeout 180 --output evals/results_fast.jsonl
+  --timeout 180 --output evals/results.jsonl
 
 # With quality scoring. Keep --ragas-workers at 1: the judge rate-limits, and ragas
 # answers a 429 by retrying until the per-job timeout, turning throughput into NaNs.
@@ -797,7 +799,7 @@ uv run python scripts/run_eval.py --api-url http://127.0.0.1:8010 --mode fast \
 # Triage a run: which failures are real, which are the scorer being brittle
 uv run python -c "
 import json
-for r in map(json.loads, open('evals/results_fast.jsonl')):
+for r in map(json.loads, open('evals/results.jsonl')):
     if not r.get('passed'):
         print(r['id'], r.get('missing_required_terms'), repr(r.get('answer','')[:100]))
 "
