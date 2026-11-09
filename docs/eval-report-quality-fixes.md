@@ -45,11 +45,13 @@ so the two repository artifacts are not interchangeable. In that raw file the
 
 - Department routing: 75/75 correct in the recorded rerun. Offline, the fast
   router decides 59 of the 75 questions and matches the expected department on
-  every one of them; the other 16 (including `vague_how_much`, `hr_review_pip`,
-  `fin_fiscal_year_end`, `oos_severance` and `vague_deadline`) carry no term the
-  fast router recognizes and defer to the model router
-  (`src/app/agents/router.py:226`). The 75/75 is the final observed count across
-  both routers, not deterministic route coverage.
+  every one of them. Of the other 16, which carry no term the fast router
+  recognizes, 14 defer to the model router (`src/app/agents/router.py:236`) —
+  including `hr_review_pip`, `fin_fiscal_year_end` and `oos_severance` — and 2
+  (`vague_how_much`, `vague_deadline`) are answered by the clarification reply
+  from `is_vague_subquestion` before routing
+  (`src/app/agents/router.py:547`). The 75/75 is the final observed count across
+  all three paths, not deterministic route coverage.
 - The frozen baseline's three department mismatches — `hr_ld_budget_wording`,
   `hr_tuition_reimbursement` (routed `finance`) and
   `both_conference_travel_approval` (routed `finance`, HR half dropped) — are
