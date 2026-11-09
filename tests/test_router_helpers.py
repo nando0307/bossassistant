@@ -112,6 +112,15 @@ def test_fast_router_routes_policy_topics_despite_lexical_collisions() -> None:
     assert route_question_fast("Do I need approval to attend a conference that requires travel?") == "both"
 
 
+def test_fast_router_keeps_finance_half_of_tuition_question() -> None:
+    """A benefit question that also asks about travel must still retrieve Finance."""
+    assert (
+        route_question_fast(
+            "I am taking a course with tuition reimbursement - what class of flight can I book for the trip?"
+        )
+        == "both"
+    )
+
 # ── is_vague_subquestion ─────────────────────────────────────────────
 
 

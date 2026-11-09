@@ -107,6 +107,7 @@ HR_TERMS = {
     "health",
     "hr",
     "l&d",
+    "learning and development",
     "leave",
     "onboarding",
     "parental",
@@ -207,7 +208,9 @@ def split_user_questions(question: str) -> list[str]:
 def route_question_fast(question: str) -> Literal["hr", "finance", "both"] | None:
     has_hr = _contains_any(question, HR_TERMS)
     has_finance = _contains_any(question, FINANCE_TERMS)
-    if _contains_any(question, {"degree", "l&d", "learning and development", "tuition"}):
+    if _contains_any(question, {"degree", "l&d", "learning and development", "tuition"}) and not _contains_any(
+        question, FINANCE_TERMS - {"budget", "reimbursement"}
+    ):
         return "hr"
 
     if has_hr and has_finance:
