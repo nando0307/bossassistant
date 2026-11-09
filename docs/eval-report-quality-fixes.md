@@ -8,28 +8,48 @@
 | Prior live run (semantic cache enabled) | 64/75 | 70/75 | 69/75 | 65/75 | not recorded |
 | This branch, live rerun (semantic cache disabled) | 63/75 | 75/75 | 67/75 | 65/75 | 0 |
 
-The three rows are not directly comparable: the baseline and the branch run used
-a different model route and the prior live run had the semantic cache enabled,
-which answers repeated questions without retrieval. The recorded numbers
-therefore do **not** establish an aggregate improvement — the fully-passed count
-moved from 64 to 63 while department routing moved from 72/75 (frozen baseline)
-and 70/75 (prior live run) to 75/75. Raw result rows and credentials stay out of
-the repository.
+The rows come from different sources — the frozen baseline in `evals/` was
+measured through a different model route, and the prior live run had the semantic
+cache enabled, which answers repeated questions without retrieval. The recorded
+numbers therefore do **not** establish an aggregate improvement, and the two
+64/75 totals do not mean the same thing: the fully-passed count moved from 64 to
+63 while department routing moved from 72/75 (frozen baseline) and 70/75 (prior
+live run) to 75/75. Raw result rows and credentials stay out of the repository.
+
+## Recovered vs newly failing
+
+The frozen baseline's 11 failures are `finance_international_per_diem`,
+`hr_review_self_assessment`, `hr_ld_budget_wording`, `hr_tuition_reimbursement`,
+`hr_tuition_clawback`, `fin_expense_deadline`, `fin_domestic_meal_per_diem`,
+`fin_external_auditor`, `both_conference_travel_approval`,
+`both_new_hire_first_trip` and `adversarial_pto_inflation`.
+
+The recorded rerun passes 63/75, i.e. 12 failing cases. Its per-case rows are not
+committed, so which baseline failures recovered and which case newly failed
+cannot be read from this repository, and because the model route and cache setting
+differ from the baseline, the 64 → 63 movement is not attributed to this change
+here. Reproducing the run with the commands below and diffing per-case `passed`
+is what closes that gap.
 
 ## What is evidenced
 
-- Department routing: 75/75 correct in the recorded rerun, up from 70/75 live and
-  72/75 in the frozen baseline. An offline replay of `route_question_fast` over
-  all 75 eval questions agrees with every expected department, so
-  `hr_ld_budget_wording`, `hr_tuition_reimbursement` and
-  `both_conference_travel_approval` now reach the right index or both indexes.
+- Department routing: 75/75 correct in the recorded rerun. Offline, the fast
+  router decides 59 of the 75 questions and matches the expected department on
+  every one of them; the other 16 (including `vague_how_much`, `hr_review_pip`,
+  `fin_fiscal_year_end`, `oos_severance` and `vague_deadline`) carry no term the
+  fast router recognizes and defer to the model router
+  (`src/app/agents/router.py:226`). The 75/75 is the final observed count across
+  both routers, not deterministic route coverage.
+- The frozen baseline's three department mismatches — `hr_ld_budget_wording`,
+  `hr_tuition_reimbursement` (routed `finance`) and
+  `both_conference_travel_approval` (routed `finance`, HR half dropped) — are
+  gone in the recorded rerun.
+- The mixed benefit/budget routing limitation is not fixed: a question whose only
+  finance signal is `budget` or `reimbursement` still routes HR alone.
 - The intermittent HTTP 500s seen during live questions did not reproduce in this
   run (0 HTTP errors); the cause is still unexplained and is not claimed fixed.
 
-## Still failing (retrieval coverage or generation, not routing)
-
-The recorded run still loses quality matches relative to the frozen baseline, and
-these baseline failures are untouched by any changed line:
+## Remaining baseline failures with identified causes
 
 - `fin_external_auditor` — `FIN-007` is never retrieved; no prompt change can
   supply support that retrieval did not return.
@@ -39,6 +59,9 @@ these baseline failures are untouched by any changed line:
 - `hr_tuition_clawback` — answers the clawback but omits the 12-month window.
 - `hr_review_self_assessment` — the response arrived as repeated `<unk>` tokens,
   i.e. a corrupted generation from the gateway, not a policy or routing defect.
+- `fin_expense_deadline`, `adversarial_pto_inflation` — addressed by the
+  abstention prompt change; whether they now pass is not evidenced by the
+  aggregates above.
 
 ## Reproducing the comparison
 
