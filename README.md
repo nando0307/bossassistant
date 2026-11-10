@@ -443,10 +443,13 @@ TOKEN=$(uv run python scripts/mint_token.py \
 uv run python scripts/run_eval.py --api-url http://127.0.0.1:8000 --token "$TOKEN"
 ```
 
+The harness writes `evals/results.jsonl`, which is gitignored; the tracked
+`evals/results_fast.jsonl` stays untouched as the frozen baseline's source.
+
 Compare a run against the frozen baseline:
 
 ```bash
-uv run python scripts/eval_gate.py check evals/results_fast.jsonl \
+uv run python scripts/eval_gate.py check evals/results.jsonl \
   --baseline evals/baseline_fast.json
 ```
 

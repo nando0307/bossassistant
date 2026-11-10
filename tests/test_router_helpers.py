@@ -104,6 +104,23 @@ def test_fast_router_detects_finance_terms() -> None:
     assert route_question_fast("Can I get reimbursement for this?") == "finance"
 
 
+def test_fast_router_routes_policy_topics_despite_lexical_collisions() -> None:
+    assert route_question_fast("What is my annual L&D budget?") == "hr"
+    assert route_question_fast("How much tuition reimbursement can I claim?") == "hr"
+    assert route_question_fast("What class of rental car can I book?") == "finance"
+    assert route_question_fast("What cabin class can I book for a nine-hour flight?") == "finance"
+    assert route_question_fast("Do I need approval to attend a conference that requires travel?") == "both"
+
+
+def test_fast_router_keeps_finance_half_of_tuition_question() -> None:
+    """A benefit question that also asks about travel must still retrieve Finance."""
+    assert (
+        route_question_fast(
+            "I am taking a course with tuition reimbursement - what class of flight can I book for the trip?"
+        )
+        == "both"
+    )
+
 # ── is_vague_subquestion ─────────────────────────────────────────────
 
 
