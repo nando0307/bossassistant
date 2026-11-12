@@ -193,6 +193,81 @@ def test_multi_chunk_body_reaches_the_app_intact(endpoint, api_policy_gate, monk
 
 
 @pytest.mark.parametrize("endpoint", ["/ask", "/ask/stream"])
+@pytest.mark.parametrize("authenticated", [True, False])
+def test_incomplete_body_never_holds_a_registration(
+    endpoint, authenticated, api_policy_gate, monkeypatch
+):
+    """A stalled socket must not pin the durable registration maintenance drains."""
+    def forbidden(*args, **kwargs):
+        pytest.fail("Policy work began before the request body completed")
+    monkeypatch.setattr(main, "answer_question", forbidden)
+    monkeypatch.setattr(main, "stream_question", forbidden)
+
+    async def scenario():
+        first = True
+
+        async def receive():
+            nonlocal first
+            if first:
+                first = False
+                return {"type": "http.request", "body": b'{"question":', "more_body": True}
+            await asyncio.Future()
+
+        async def send(message):
+            pytest.fail("A stalled request must not produce a response")
+
+        scope = scope_for(endpoint)
+        if not authenticated:
+            scope["headers"] = [(b"content-type", b"application/json")]
+        task = asyncio.create_task(main.app(scope, receive, send))
+        try:
+            await asyncio.sleep(0.1)
+            assert api_policy_gate.active == set(), "an incomplete body pinned a registration"
+        finally:
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("endpoint", ["/ask", "/ask/stream"])
+def test_body_completing_after_gate_closes_is_refused(endpoint, api_policy_gate, monkeypatch):
+    """Registration happens at handler entry, so a body that finishes after
+    maintenance started cannot slip into policy work."""
+    def forbidden(*args, **kwargs):
+        pytest.fail("Policy work began after maintenance closed")
+    monkeypatch.setattr(main, "answer_question", forbidden)
+    monkeypatch.setattr(main, "stream_question", forbidden)
+
+    async def scenario():
+        chunks = [b'{"question":', b' "PTO?"}']
+        messages: list = []
+
+        async def receive():
+            if chunks:
+                body = chunks.pop(0)
+                if len(chunks) == 1:
+                    api_policy_gate.open = False
+                return {"type": "http.request", "body": body, "more_body": bool(chunks)}
+            await asyncio.Future()
+
+        async def send(message):
+            messages.append(message)
+
+        task = asyncio.create_task(main.app(scope_for(endpoint), receive, send))
+        await asyncio.wait_for(task, 5)
+        return messages
+
+    messages = asyncio.run(scenario())
+    status = next(m["status"] for m in messages if m["type"] == "http.response.start")
+    assert status == 503
+    assert api_policy_gate.active == set()
+
+
+@pytest.mark.parametrize("endpoint", ["/ask", "/ask/stream"])
 def test_registration_covers_last_response_send(endpoint, api_policy_gate, monkeypatch):
     monkeypatch.setattr(main, "answer_question", lambda *a, **k: {
         "answer": "policy", "sources": [], "department_routed": "hr",

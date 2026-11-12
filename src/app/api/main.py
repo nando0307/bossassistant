@@ -22,7 +22,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
 from app.agents.router import answer_question, stream_question
-from app.api.policy import PolicyAdmission
+from app.api.policy import PolicyAdmission, require_policy_admission
 from app.auth import DEMO_PERSONAS, Principal, get_principal, issue_demo_token
 from app.config import settings
 from app.policy import gate
@@ -140,6 +140,7 @@ def _sse(event: str, data: object) -> str:
 def ask_stream(
     request: AskRequest,
     principal: Principal = Depends(get_principal),
+    _admission: None = Depends(require_policy_admission),
 ) -> StreamingResponse:
     """Answer as a Server-Sent Event stream.
 
@@ -202,6 +203,7 @@ def _verify_auth_configuration() -> None:
 def ask(
     request: AskRequest,
     principal: Principal = Depends(get_principal),
+    _admission: None = Depends(require_policy_admission),
 ) -> AskResponse:
     """Answer a question using the department-scoped, ACL-filtered RAG pipeline.
 

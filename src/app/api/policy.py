@@ -1,21 +1,82 @@
 """ASGI admission covers generation AND the last response byte, including SSE.
 
-A disconnected client does not cancel policy work. The app runs to completion
-in a shielded task, discarding output after disconnect. Thus synchronous model
-threads and their executor children finish before the registration is released.
+Registration happens only after the request body is parsed and the caller is
+authenticated, so an unauthenticated or stalled request can never hold a
+durable registration. A disconnected client does not cancel policy work: the
+app runs to completion in a shielded task, discarding output after disconnect,
+so synchronous model threads finish before the registration is released.
 """
 from __future__ import annotations
 
 import asyncio
 import logging
+from contextvars import ContextVar, Token
 
 from anyio import to_thread
+from fastapi import Depends, HTTPException, status
 from starlette.responses import JSONResponse
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
+from app.auth import Principal, get_principal
 from app.policy import gate, policy_revision
 
 log = logging.getLogger(__name__)
+
+_UNAVAILABLE = "policy maintenance or shared state unavailable"
+
+
+class Admission:
+    """One request's registration with the shared gate."""
+
+    def __init__(self) -> None:
+        self.ticket: str | None = None
+        self.revision: str | None = None
+        self._token: Token[str | None] | None = None
+
+    def activate(self, ticket: str, revision: str) -> None:
+        self.ticket = ticket
+        self.revision = revision
+        self._token = policy_revision.set(revision)
+
+    def check(self) -> None:
+        if self.ticket is None or self.revision is None:
+            raise RuntimeError("Policy check without a registration")
+        gate.check(self.ticket, self.revision)
+
+    def release(self) -> None:
+        ticket, self.ticket = self.ticket, None
+        if ticket is not None:
+            gate.release(ticket)
+
+    def reset_context(self) -> None:
+        if self._token is not None:
+            policy_revision.reset(self._token)
+            self._token = None
+
+
+_current: ContextVar[Admission | None] = ContextVar("policy_admission", default=None)
+
+
+async def require_policy_admission(
+    _principal: Principal = Depends(get_principal),
+) -> None:
+    """Register after body parsing and authentication, before any policy work."""
+    admission = _current.get()
+    if admission is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=_UNAVAILABLE,
+            headers={"Retry-After": "30"},
+        )
+    try:
+        ticket, revision = await to_thread.run_sync(gate.admit)
+    except Exception:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=_UNAVAILABLE,
+            headers={"Retry-After": "30"},
+        ) from None
+    admission.activate(ticket, revision)
 
 
 class PolicyAdmission:
@@ -40,17 +101,12 @@ class PolicyAdmission:
 
     async def _serve(self, scope: Scope, receive: Receive, send: Send) -> None:
         unavailable = JSONResponse(
-            {"detail": "policy maintenance or shared state unavailable"},
+            {"detail": _UNAVAILABLE},
             status_code=503,
             headers={"Retry-After": "30"},
         )
-        try:
-            ticket, revision = await to_thread.run_sync(gate.admit)
-        except Exception:
-            await unavailable(scope, receive, send)
-            return
-
-        token = policy_revision.set(revision)
+        admission = Admission()
+        token = _current.set(admission)
         disconnected = False
         body_complete = False
         started = False
@@ -79,13 +135,14 @@ class PolicyAdmission:
             nonlocal disconnected, started
             if disconnected:
                 return
-            try:
-                await to_thread.run_sync(gate.check, ticket, revision)
-            except Exception:
-                disconnected = True
-                if not started:
-                    await unavailable(scope, receive, send)
-                return
+            if admission.ticket is not None:
+                try:
+                    await to_thread.run_sync(admission.check)
+                except Exception:
+                    disconnected = True
+                    if not started:
+                        await unavailable(scope, receive, send)
+                    return
             try:
                 await send(message)
                 started = True
@@ -103,10 +160,12 @@ class PolicyAdmission:
                 raise
             completed = True
         finally:
-            policy_revision.reset(token)
-            if completed:
+            admission.reset_context()
+            _current.reset(token)
+            if completed and admission.ticket is not None:
+                ticket = admission.ticket
                 try:
-                    await to_thread.run_sync(gate.release, ticket)
+                    await to_thread.run_sync(admission.release)
                 except Exception:
                     # An uncertain release must not turn into false drain.
                     log.exception("Policy registration retained after release failure: %s", ticket)
