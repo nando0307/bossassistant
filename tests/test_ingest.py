@@ -8,10 +8,17 @@ from __future__ import annotations
 
 from typing import Any
 
+import pytest
 from langchain_core.documents import Document
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
-from scripts.ingest import build_chunks, sync_department
+from scripts.ingest import build_chunks, metadata_properties, sync_department
+
+
+@pytest.fixture(autouse=True)
+def drained_maintenance(monkeypatch):
+    from scripts import ingest
+    monkeypatch.setattr(ingest.gate, "drained", lambda owner: owner == "unit-test")
 
 
 class FakeGraph:
@@ -74,6 +81,7 @@ def _stored_from(chunks: list[Any]) -> list[dict[str, Any]]:
             "source": c.source,
             "chunk_idx": c.chunk_idx,
             "content_hash": c.content_hash,
+            "properties": metadata_properties(c),
         }
         for i, c in enumerate(chunks)
     ]
@@ -103,7 +111,7 @@ def test_reingest_with_no_changes_writes_nothing() -> None:
     chunks = build_chunks(docs, _splitter())
     graph = FakeGraph(_stored_from(chunks))
 
-    stats = sync_department(graph, "hr", chunks, embedder=FakeEmbedder())  # type: ignore[arg-type]
+    stats = sync_department(graph, "hr", chunks, embedder=FakeEmbedder(), maintenance="unit-test")  # type: ignore[arg-type]
 
     assert stats == {
         "total": len(chunks),
@@ -111,6 +119,7 @@ def test_reingest_with_no_changes_writes_nothing() -> None:
         "new": 0,
         "changed": 0,
         "deleted": 0,
+        "metadata_changed": 0,
     }
     assert graph.writes == [], "an unchanged corpus must not write or embed"
 
@@ -122,7 +131,7 @@ def test_changed_document_updates_only_its_own_chunks() -> None:
 
     docs[1] = _doc("HR-002", "beta revised " * 200)
     revised = build_chunks(docs, _splitter())
-    stats = sync_department(graph, "hr", revised, embedder=FakeEmbedder())  # type: ignore[arg-type]
+    stats = sync_department(graph, "hr", revised, embedder=FakeEmbedder(), maintenance="unit-test")  # type: ignore[arg-type]
 
     assert stats["unchanged"] > 0
     assert stats["changed"] + stats["new"] > 0
@@ -136,7 +145,7 @@ def test_removed_document_has_its_chunks_deleted() -> None:
     graph = FakeGraph(_stored_from(chunks))
 
     remaining = build_chunks([docs[0]], _splitter())
-    stats = sync_department(graph, "hr", remaining, embedder=FakeEmbedder())  # type: ignore[arg-type]
+    stats = sync_department(graph, "hr", remaining, embedder=FakeEmbedder(), maintenance="unit-test")  # type: ignore[arg-type]
 
     removed = len(chunks) - len(remaining)
     assert stats["deleted"] == removed
@@ -151,7 +160,7 @@ def test_shortened_document_deletes_its_trailing_chunks() -> None:
     graph = FakeGraph(_stored_from(chunks))
 
     shorter = build_chunks([_doc("HR-001", "alpha " * 60)], _splitter())
-    stats = sync_department(graph, "hr", shorter, embedder=FakeEmbedder())  # type: ignore[arg-type]
+    stats = sync_department(graph, "hr", shorter, embedder=FakeEmbedder(), maintenance="unit-test")  # type: ignore[arg-type]
 
     assert stats["deleted"] == len(chunks) - len(shorter)
 
@@ -170,7 +179,7 @@ def test_legacy_nodes_without_chunk_idx_are_replaced_not_duplicated() -> None:
     ]
     graph = FakeGraph(legacy)
 
-    stats = sync_department(graph, "hr", chunks, embedder=FakeEmbedder())  # type: ignore[arg-type]
+    stats = sync_department(graph, "hr", chunks, embedder=FakeEmbedder(), maintenance="unit-test")  # type: ignore[arg-type]
 
     assert stats["deleted"] == len(legacy)
     assert stats["new"] == len(chunks)
