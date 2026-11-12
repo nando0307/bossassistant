@@ -196,10 +196,12 @@ above predate both changes and have not been re-measured.
 
 ## Ingestion that survives a changing corpus
 
-Chunks have stable identity `(source, chunk_idx)` plus a content hash. Unchanged chunks are
-skipped with no embedding call; changed chunks are re-embedded in place; chunks the corpus
-no longer produces are **deleted**. A second run over an unchanged corpus writes nothing —
-asserted in tests, because "idempotent" is a claim that rots silently.
+Chunks have stable identity `(source, chunk_idx)` plus a content hash. Unchanged text
+is not re-embedded; metadata-only ACL and supersession changes still synchronize.
+Changed text is re-embedded in place; removed chunks are deleted. An unchanged
+corpus writes no chunks, while its maintenance/publication state still advances.
+Shared admission closes and drains JSON/SSE work before updates, and verified
+publication advances the cache revision across workers. Failed updates stay closed.
 
 Documents carry `effective_date`, and a revision declares `supersedes`. Superseded chunks
 are dropped at retrieval in both modes, so a replaced policy never enters the prompt, and

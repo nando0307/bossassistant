@@ -8,10 +8,17 @@ from __future__ import annotations
 
 from typing import Any
 
+import pytest
 from langchain_core.documents import Document
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
-from scripts.ingest import build_chunks, sync_department
+from scripts.ingest import build_chunks, metadata_properties, sync_department
+
+
+@pytest.fixture(autouse=True)
+def drained_maintenance(monkeypatch):
+    from scripts import ingest
+    monkeypatch.setattr(ingest.gate, "drained", lambda owner: owner == "unit-test")
 
 
 class FakeGraph:
@@ -31,6 +38,15 @@ class FakeGraph:
         if "DETACH DELETE" in statement:
             removed = set(params.get("ids", []))
             self.stored = [row for row in self.stored if row["element_id"] not in removed]
+        if "SET c += row.metadata" in statement:
+            updates = {
+                (row["source"], row["chunk_idx"]): row["metadata"]
+                for row in params.get("rows", [])
+            }
+            for row in self.stored:
+                metadata = updates.get((row["source"], row["chunk_idx"]))
+                if metadata is not None:
+                    row["properties"].update(metadata)
         return []
 
     @property
@@ -45,7 +61,11 @@ class FakeGraph:
 class FakeEmbedder:
     """Deterministic stand-in; the diff logic is what is under test."""
 
+    def __init__(self) -> None:
+        self.calls = 0
+
     def embed_documents(self, texts: list[str]) -> list[list[float]]:
+        self.calls += len(texts)
         return [[float(len(t)), 0.0, 1.0] for t in texts]
 
 
@@ -74,6 +94,7 @@ def _stored_from(chunks: list[Any]) -> list[dict[str, Any]]:
             "source": c.source,
             "chunk_idx": c.chunk_idx,
             "content_hash": c.content_hash,
+            "properties": metadata_properties(c),
         }
         for i, c in enumerate(chunks)
     ]
@@ -103,7 +124,7 @@ def test_reingest_with_no_changes_writes_nothing() -> None:
     chunks = build_chunks(docs, _splitter())
     graph = FakeGraph(_stored_from(chunks))
 
-    stats = sync_department(graph, "hr", chunks, embedder=FakeEmbedder())  # type: ignore[arg-type]
+    stats = sync_department(graph, "hr", chunks, embedder=FakeEmbedder(), maintenance="unit-test")  # type: ignore[arg-type]
 
     assert stats == {
         "total": len(chunks),
@@ -111,6 +132,7 @@ def test_reingest_with_no_changes_writes_nothing() -> None:
         "new": 0,
         "changed": 0,
         "deleted": 0,
+        "metadata_changed": 0,
     }
     assert graph.writes == [], "an unchanged corpus must not write or embed"
 
@@ -122,7 +144,7 @@ def test_changed_document_updates_only_its_own_chunks() -> None:
 
     docs[1] = _doc("HR-002", "beta revised " * 200)
     revised = build_chunks(docs, _splitter())
-    stats = sync_department(graph, "hr", revised, embedder=FakeEmbedder())  # type: ignore[arg-type]
+    stats = sync_department(graph, "hr", revised, embedder=FakeEmbedder(), maintenance="unit-test")  # type: ignore[arg-type]
 
     assert stats["unchanged"] > 0
     assert stats["changed"] + stats["new"] > 0
@@ -136,7 +158,7 @@ def test_removed_document_has_its_chunks_deleted() -> None:
     graph = FakeGraph(_stored_from(chunks))
 
     remaining = build_chunks([docs[0]], _splitter())
-    stats = sync_department(graph, "hr", remaining, embedder=FakeEmbedder())  # type: ignore[arg-type]
+    stats = sync_department(graph, "hr", remaining, embedder=FakeEmbedder(), maintenance="unit-test")  # type: ignore[arg-type]
 
     removed = len(chunks) - len(remaining)
     assert stats["deleted"] == removed
@@ -151,7 +173,7 @@ def test_shortened_document_deletes_its_trailing_chunks() -> None:
     graph = FakeGraph(_stored_from(chunks))
 
     shorter = build_chunks([_doc("HR-001", "alpha " * 60)], _splitter())
-    stats = sync_department(graph, "hr", shorter, embedder=FakeEmbedder())  # type: ignore[arg-type]
+    stats = sync_department(graph, "hr", shorter, embedder=FakeEmbedder(), maintenance="unit-test")  # type: ignore[arg-type]
 
     assert stats["deleted"] == len(chunks) - len(shorter)
 
@@ -170,10 +192,49 @@ def test_legacy_nodes_without_chunk_idx_are_replaced_not_duplicated() -> None:
     ]
     graph = FakeGraph(legacy)
 
-    stats = sync_department(graph, "hr", chunks, embedder=FakeEmbedder())  # type: ignore[arg-type]
+    stats = sync_department(graph, "hr", chunks, embedder=FakeEmbedder(), maintenance="unit-test")  # type: ignore[arg-type]
 
     assert stats["deleted"] == len(legacy)
     assert stats["new"] == len(chunks)
+
+
+def test_acl_revocation_syncs_metadata_without_reembedding() -> None:
+    """Revoking a group must take effect without paying to re-embed unchanged text.
+
+    The corpus text is identical and only `acl_groups` changed, so the published
+    revision must store the new ACL and leave the embedding untouched.
+    """
+    docs = [_doc("HR-001", "alpha " * 200)]
+    graph = FakeGraph(_stored_from(build_chunks(docs, _splitter())))
+    embedder = FakeEmbedder()
+    docs[0].metadata["acl_groups"] = ["executives"]
+
+    stats = sync_department(
+        graph, "hr", build_chunks(docs, _splitter()),  # type: ignore[arg-type]
+        embedder=embedder, maintenance="unit-test",
+    )
+
+    assert stats["metadata_changed"] == len(graph.stored) > 0
+    assert stats["changed"] == stats["new"] == stats["deleted"] == 0
+    assert embedder.calls == 0, "unchanged text must not be re-embedded"
+    assert all(row["properties"]["acl_groups"] == ["executives"] for row in graph.stored)
+
+
+def test_supersession_syncs_metadata_without_reembedding() -> None:
+    """Superseding a policy is metadata too: mark it replaced, keep the vector."""
+    docs = [_doc("HR-001", "alpha " * 200)]
+    graph = FakeGraph(_stored_from(build_chunks(docs, _splitter())))
+    embedder = FakeEmbedder()
+    docs[0].metadata["superseded_by"] = "HR-002"
+
+    stats = sync_department(
+        graph, "hr", build_chunks(docs, _splitter()),  # type: ignore[arg-type]
+        embedder=embedder, maintenance="unit-test",
+    )
+
+    assert stats["metadata_changed"] == len(graph.stored) > 0
+    assert embedder.calls == 0
+    assert all(row["properties"]["superseded_by"] == "HR-002" for row in graph.stored)
 
 
 # ── Supersession ─────────────────────────────────────────────────────

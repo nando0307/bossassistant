@@ -4,6 +4,8 @@ Every test here that matters is an isolation test.
 """
 from __future__ import annotations
 
+import time
+
 import numpy as np
 
 from app.cache import SemanticCache, normalize, partition_key
@@ -111,6 +113,21 @@ def test_invalidate_all_clears_every_partition() -> None:
     cache.put(_vec(0, 1, 0), EXEC, "q2", {"answer": "old"})
     cache.invalidate_all()
     assert cache.size() == 0
+
+
+def test_expired_partitions_are_pruned_across_revisions() -> None:
+    """Retention must stay bounded as publications accumulate new partitions."""
+    cache = SemanticCache(ttl_seconds=0.01)
+    old = frozenset({"\x00revision=one"})
+    new = frozenset({"\x00revision=two"})
+    cache.put(_vec(1, 0, 0), old, "q", {"answer": "old"})
+
+    time.sleep(0.02)
+    cache.put(_vec(1, 0, 0), new, "q", {"answer": "new"})
+
+    assert cache.size() == 1
+    assert cache.get(_vec(1, 0, 0), old) is None
+    assert cache.get(_vec(1, 0, 0), new) == {"answer": "new"}
 
 
 def test_payload_is_copied_not_aliased() -> None:
