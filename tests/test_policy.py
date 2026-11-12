@@ -113,6 +113,41 @@ def test_disconnected_generation_remains_registered(endpoint, disconnect, api_po
 
 
 @pytest.mark.parametrize("endpoint", ["/ask", "/ask/stream"])
+def test_disconnect_before_body_completion_releases_registration(
+    endpoint, api_policy_gate, monkeypatch
+):
+    """An unauthenticated client that hangs up mid-body must not pin a registration."""
+    def forbidden(*args, **kwargs):
+        pytest.fail("Policy work began without a complete request body")
+    monkeypatch.setattr(main, "answer_question", forbidden)
+    monkeypatch.setattr(main, "stream_question", forbidden)
+
+    async def scenario():
+        sent = False
+
+        async def receive():
+            nonlocal sent
+            if not sent:
+                sent = True
+                return {"type": "http.request", "body": b'{"question":', "more_body": True}
+            return {"type": "http.disconnect"}
+
+        async def send(message):
+            pass
+
+        scope = scope_for(endpoint)
+        scope["headers"] = [(b"content-type", b"application/json")]
+        task = asyncio.create_task(main.app(scope, receive, send))
+        try:
+            await asyncio.wait_for(task, 5)
+        except Exception:
+            pass
+        assert api_policy_gate.active == set(), "partial-body disconnect leaked a registration"
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("endpoint", ["/ask", "/ask/stream"])
 def test_registration_covers_last_response_send(endpoint, api_policy_gate, monkeypatch):
     monkeypatch.setattr(main, "answer_question", lambda *a, **k: {
         "answer": "policy", "sources": [], "department_routed": "hr",

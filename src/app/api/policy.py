@@ -14,7 +14,6 @@ from starlette.responses import JSONResponse
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from app.policy import gate, policy_revision
-from app.cache import get_cache
 
 log = logging.getLogger(__name__)
 
@@ -53,18 +52,28 @@ class PolicyAdmission:
 
         token = policy_revision.set(revision)
         disconnected = False
+        body_complete = False
         started = False
         completed = False
 
         async def keep_receiving() -> Message:
-            nonlocal disconnected
-            message = await receive()
-            if message["type"] == "http.disconnect":
+            nonlocal disconnected, body_complete
+            while True:
+                message = await receive()
+                if message["type"] == "http.request" and not message.get("more_body", False):
+                    body_complete = True
+                    return message
+                if message["type"] != "http.disconnect":
+                    continue
                 disconnected = True
+                if not body_complete:
+                    # Nothing was generated yet; let the app abort so this
+                    # registration is released instead of pinned forever.
+                    return message
                 # StreamingResponse's disconnect listener waits until generation
                 # finishes; its normal task-group exit cancels this listener.
                 await asyncio.Future()
-            return message
+                return message
 
         async def guarded_send(message: Message) -> None:
             nonlocal disconnected, started
@@ -85,7 +94,6 @@ class PolicyAdmission:
 
         try:
             try:
-                get_cache().activate_revision(revision)
                 await self.app(scope, keep_receiving, guarded_send)
             except Exception:
                 # Normal exception unwinding has joined synchronous work. A

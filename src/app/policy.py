@@ -44,6 +44,47 @@ class PolicyGate:
                 "ON CREATE SET g.open = false, g.revision = 0, g.active = [], g.serial = 0"
             ).consume()
 
+    @staticmethod
+    def _parse(record: Any) -> dict[str, Any]:
+        if record is None:
+            raise PolicyUnavailable("Policy state is missing; run verified ingestion")
+        state = dict(record["state"])
+        if not isinstance(state.get("active"), list) or not isinstance(state.get("revision"), int):
+            raise PolicyUnavailable("Invalid policy state")
+        return state
+
+    def _clear_uncertainty(self, session: Any) -> None:
+        # If a state operation failed, never turn restored connectivity into
+        # implicit recovery. Persist closure before doing any more work. Only
+        # verified ingestion can subsequently reopen it.
+        with self._fault_lock:
+            if not self._uncertain:
+                return
+            session.run(
+                "MATCH (g:PolicyGate {key: 'corpus'}) SET g.open = false"
+            ).consume()
+            self._uncertain = False
+
+    def _read(self) -> dict[str, Any]:
+        """Read-only: the per-response fence must not serialize on the write lock."""
+        def read(tx: Any) -> dict[str, Any]:
+            return self._parse(
+                tx.run(
+                    "MATCH (g:PolicyGate {key: 'corpus'}) RETURN properties(g) AS state"
+                ).single()
+            )
+
+        try:
+            with get_driver().session(database=settings.neo4j_database) as session:
+                self._clear_uncertainty(session)
+                return session.execute_read(read)
+        except PolicyUnavailable:
+            raise
+        except Exception:
+            with self._fault_lock:
+                self._uncertain = True
+            raise
+
     def _write(self, change: Callable[[Any, dict[str, Any]], T]) -> T:
         def transaction(tx: Any) -> T:
             # Dependent update takes the lock BEFORE reading state. Neo4j can
@@ -53,24 +94,11 @@ class PolicyGate:
                 "MATCH (g:PolicyGate {key: 'corpus'}) "
                 "SET g.serial = g.serial + 1 RETURN properties(g) AS state"
             ).single()
-            if record is None:
-                raise PolicyUnavailable("Policy state is missing; run verified ingestion")
-            state = dict(record["state"])
-            if not isinstance(state.get("active"), list) or not isinstance(state.get("revision"), int):
-                raise PolicyUnavailable("Invalid policy state")
-            return change(tx, state)
+            return change(tx, self._parse(record))
 
         try:
             with get_driver().session(database=settings.neo4j_database) as session:
-                # If a state operation failed, never turn restored connectivity
-                # into implicit recovery. Persist closure before doing any more
-                # work. Only verified ingestion can subsequently reopen it.
-                with self._fault_lock:
-                    if self._uncertain:
-                        session.run(
-                            "MATCH (g:PolicyGate {key: 'corpus'}) SET g.open = false"
-                        ).consume()
-                        self._uncertain = False
+                self._clear_uncertainty(session)
                 return session.execute_write(transaction)
         except PolicyUnavailable:
             raise
@@ -80,7 +108,7 @@ class PolicyGate:
             raise
 
     def snapshot(self) -> dict[str, Any]:
-        return self._write(lambda tx, state: state)
+        return self._read()
 
     def admit(self) -> tuple[str, str]:
         ticket = f"{socket.gethostname()}:{os.getpid()}:{uuid4()}"
@@ -103,7 +131,7 @@ class PolicyGate:
 
     def check(self, ticket: str, revision: str) -> None:
         """Fence output from a registration invalidated by stopped-worker recovery."""
-        state = self.snapshot()
+        state = self._read()
         if ticket not in state["active"] or revision != state.get("published_by"):
             raise PolicyUnavailable("Policy registration is no longer valid")
 

@@ -38,6 +38,15 @@ class FakeGraph:
         if "DETACH DELETE" in statement:
             removed = set(params.get("ids", []))
             self.stored = [row for row in self.stored if row["element_id"] not in removed]
+        if "SET c += row.metadata" in statement:
+            updates = {
+                (row["source"], row["chunk_idx"]): row["metadata"]
+                for row in params.get("rows", [])
+            }
+            for row in self.stored:
+                metadata = updates.get((row["source"], row["chunk_idx"]))
+                if metadata is not None:
+                    row["properties"].update(metadata)
         return []
 
     @property
@@ -52,7 +61,11 @@ class FakeGraph:
 class FakeEmbedder:
     """Deterministic stand-in; the diff logic is what is under test."""
 
+    def __init__(self) -> None:
+        self.calls = 0
+
     def embed_documents(self, texts: list[str]) -> list[list[float]]:
+        self.calls += len(texts)
         return [[float(len(t)), 0.0, 1.0] for t in texts]
 
 
@@ -183,6 +196,45 @@ def test_legacy_nodes_without_chunk_idx_are_replaced_not_duplicated() -> None:
 
     assert stats["deleted"] == len(legacy)
     assert stats["new"] == len(chunks)
+
+
+def test_acl_revocation_syncs_metadata_without_reembedding() -> None:
+    """Revoking a group must take effect without paying to re-embed unchanged text.
+
+    The corpus text is identical and only `acl_groups` changed, so the published
+    revision must store the new ACL and leave the embedding untouched.
+    """
+    docs = [_doc("HR-001", "alpha " * 200)]
+    graph = FakeGraph(_stored_from(build_chunks(docs, _splitter())))
+    embedder = FakeEmbedder()
+    docs[0].metadata["acl_groups"] = ["executives"]
+
+    stats = sync_department(
+        graph, "hr", build_chunks(docs, _splitter()),
+        embedder=embedder, maintenance="unit-test",  # type: ignore[arg-type]
+    )
+
+    assert stats["metadata_changed"] == len(graph.stored) > 0
+    assert stats["changed"] == stats["new"] == stats["deleted"] == 0
+    assert embedder.calls == 0, "unchanged text must not be re-embedded"
+    assert all(row["properties"]["acl_groups"] == ["executives"] for row in graph.stored)
+
+
+def test_supersession_syncs_metadata_without_reembedding() -> None:
+    """Superseding a policy is metadata too: mark it replaced, keep the vector."""
+    docs = [_doc("HR-001", "alpha " * 200)]
+    graph = FakeGraph(_stored_from(build_chunks(docs, _splitter())))
+    embedder = FakeEmbedder()
+    docs[0].metadata["superseded_by"] = "HR-002"
+
+    stats = sync_department(
+        graph, "hr", build_chunks(docs, _splitter()),
+        embedder=embedder, maintenance="unit-test",  # type: ignore[arg-type]
+    )
+
+    assert stats["metadata_changed"] == len(graph.stored) > 0
+    assert embedder.calls == 0
+    assert all(row["properties"]["superseded_by"] == "HR-002" for row in graph.stored)
 
 
 # ── Supersession ─────────────────────────────────────────────────────

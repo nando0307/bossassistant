@@ -21,8 +21,9 @@ wrong is silent.
 
 **Ceilings.** In-process, so each worker keeps its own copy and hit rate falls
 as workers scale. API requests include the shared published policy revision in
-their partition: an old answer is unreachable immediately after publication,
-including in workers that were idle during maintenance. TTL bounds retention.
+their partition key, which is the sole freshness authority: an old answer is
+unreachable immediately after publication, including in workers that were idle
+during maintenance. TTL bounds retention of the now-unreachable partitions.
 """
 from __future__ import annotations
 
@@ -87,7 +88,6 @@ class SemanticCache:
         self._partitions: dict[str, list[CacheEntry]] = {}
         self._lock = threading.Lock()
         self.stats = CacheStats()
-        self._revision: str | None = None
 
     def _fresh(self, entries: list[CacheEntry], now: float) -> list[CacheEntry]:
         return [e for e in entries if now - e.created < self.ttl_seconds]
@@ -137,14 +137,6 @@ class SemanticCache:
         with self._lock:
             self._partitions.clear()
             self.stats.partitions = 0
-
-    def activate_revision(self, revision: str) -> None:
-        """Reclaim stale partitions when this worker next observes publication."""
-        with self._lock:
-            if revision != self._revision:
-                self._partitions.clear()
-                self.stats.partitions = 0
-                self._revision = revision
 
     def size(self) -> int:
         with self._lock:
