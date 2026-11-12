@@ -23,7 +23,8 @@ wrong is silent.
 as workers scale. API requests include the shared published policy revision in
 their partition key, which is the sole freshness authority: an old answer is
 unreachable immediately after publication, including in workers that were idle
-during maintenance. TTL bounds retention of the now-unreachable partitions.
+during maintenance. Expired partitions are pruned on the next write, so
+retention stays bounded no matter how many revisions are published.
 """
 from __future__ import annotations
 
@@ -120,6 +121,11 @@ class SemanticCache:
         key = partition_key(groups)
         now = time.monotonic()
         with self._lock:
+            for stale_key in [
+                partition for partition, entries in self._partitions.items()
+                if not self._fresh(entries, now)
+            ]:
+                del self._partitions[stale_key]
             entries = self._fresh(self._partitions.get(key, []), now)
             entries.append(
                 CacheEntry(embedding=embedding, question=question, payload=dict(payload), created=now)

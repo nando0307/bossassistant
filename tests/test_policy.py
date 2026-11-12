@@ -148,6 +148,51 @@ def test_disconnect_before_body_completion_releases_registration(
 
 
 @pytest.mark.parametrize("endpoint", ["/ask", "/ask/stream"])
+def test_multi_chunk_body_reaches_the_app_intact(endpoint, api_policy_gate, monkeypatch):
+    """A body split across several http.request messages must not be truncated."""
+    seen: dict[str, str] = {}
+
+    def answer(question, *args, **kwargs):
+        seen["question"] = question
+        return {"answer": "15 days", "sources": [], "department_routed": "hr"}
+
+    def stream(question, *args, **kwargs):
+        seen["question"] = question
+        yield "done", "15 days"
+
+    monkeypatch.setattr(main, "answer_question", answer)
+    monkeypatch.setattr(main, "stream_question", stream)
+
+    payload = json.dumps({
+        "question": "PTO?", "history": [{"role": "user", "content": "x" * 200}],
+    }).encode()
+    chunks = [payload[:12], payload[12:60], payload[60:]]
+
+    async def scenario():
+        pending = list(chunks)
+        messages: list = []
+
+        async def receive():
+            if pending:
+                body = pending.pop(0)
+                return {"type": "http.request", "body": body, "more_body": bool(pending)}
+            await asyncio.Future()
+
+        async def send(message):
+            messages.append(message)
+
+        task = asyncio.create_task(main.app(scope_for(endpoint), receive, send))
+        await asyncio.wait_for(task, 5)
+        return messages
+
+    messages = asyncio.run(scenario())
+    assert seen["question"] == "PTO?"
+    status = next(m["status"] for m in messages if m["type"] == "http.response.start")
+    assert status == 200
+    assert api_policy_gate.active == set()
+
+
+@pytest.mark.parametrize("endpoint", ["/ask", "/ask/stream"])
 def test_registration_covers_last_response_send(endpoint, api_policy_gate, monkeypatch):
     monkeypatch.setattr(main, "answer_question", lambda *a, **k: {
         "answer": "policy", "sources": [], "department_routed": "hr",

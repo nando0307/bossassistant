@@ -60,8 +60,9 @@ class PolicyAdmission:
             nonlocal disconnected, body_complete
             while True:
                 message = await receive()
-                if message["type"] == "http.request" and not message.get("more_body", False):
-                    body_complete = True
+                if message["type"] == "http.request":
+                    if not message.get("more_body", False):
+                        body_complete = True
                     return message
                 if message["type"] != "http.disconnect":
                     continue
@@ -73,7 +74,6 @@ class PolicyAdmission:
                 # StreamingResponse's disconnect listener waits until generation
                 # finishes; its normal task-group exit cancels this listener.
                 await asyncio.Future()
-                return message
 
         async def guarded_send(message: Message) -> None:
             nonlocal disconnected, started
