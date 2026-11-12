@@ -139,7 +139,12 @@ class SemanticCache:
             self.stats.partitions = len(self._partitions)
 
     def invalidate_all(self) -> None:
-        """Drop everything. Call after the corpus changes."""
+        """Drop everything. For tests and offline tooling only.
+
+        Serving does not call this: the published policy revision in the
+        partition key already makes pre-publication answers unreachable in
+        every worker, without a broadcast.
+        """
         with self._lock:
             self._partitions.clear()
             self.stats.partitions = 0

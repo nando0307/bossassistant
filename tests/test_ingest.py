@@ -210,8 +210,8 @@ def test_acl_revocation_syncs_metadata_without_reembedding() -> None:
     docs[0].metadata["acl_groups"] = ["executives"]
 
     stats = sync_department(
-        graph, "hr", build_chunks(docs, _splitter()),
-        embedder=embedder, maintenance="unit-test",  # type: ignore[arg-type]
+        graph, "hr", build_chunks(docs, _splitter()),  # type: ignore[arg-type]
+        embedder=embedder, maintenance="unit-test",
     )
 
     assert stats["metadata_changed"] == len(graph.stored) > 0
@@ -228,8 +228,8 @@ def test_supersession_syncs_metadata_without_reembedding() -> None:
     docs[0].metadata["superseded_by"] = "HR-002"
 
     stats = sync_department(
-        graph, "hr", build_chunks(docs, _splitter()),
-        embedder=embedder, maintenance="unit-test",  # type: ignore[arg-type]
+        graph, "hr", build_chunks(docs, _splitter()),  # type: ignore[arg-type]
+        embedder=embedder, maintenance="unit-test",
     )
 
     assert stats["metadata_changed"] == len(graph.stored) > 0

@@ -3,7 +3,8 @@
 Exposes a minimal HTTP API for BossAssistant. Two probes:
 
 - `/health` — liveness. "Is the process alive?" Cheap, no I/O.
-- `/ready`  — readiness. "Are upstream deps reachable?" Hits Neo4j.
+- `/ready`  — readiness. "Is a verified, published corpus servable?" Reads
+  the shared policy gate in Neo4j; closed or unreadable state is not ready.
 
 Container orchestrators use these for different purposes: liveness
 decides whether to restart the container, readiness decides whether
