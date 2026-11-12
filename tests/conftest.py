@@ -4,6 +4,8 @@ import os
 import sys
 from pathlib import Path
 
+
+import pytest
 os.environ.setdefault("NEO4J_URI", "neo4j://localhost:7687")
 os.environ.setdefault("NEO4J_USER", "neo4j")
 os.environ.setdefault("NEO4J_PASSWORD", "test-password")
@@ -17,3 +19,14 @@ os.environ.setdefault("ENABLE_SEMANTIC_CACHE", "false")
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
+
+
+@pytest.fixture(autouse=True)
+def api_policy_gate(monkeypatch):
+    from app.api import main, policy
+    from tests.helpers import MemoryAdmission
+
+    storage = MemoryAdmission()
+    monkeypatch.setattr(policy, "gate", storage)
+    monkeypatch.setattr(main, "gate", storage)
+    return storage

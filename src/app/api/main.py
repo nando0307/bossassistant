@@ -22,9 +22,10 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
 from app.agents.router import answer_question, stream_question
+from app.api.policy import PolicyAdmission
 from app.auth import DEMO_PERSONAS, Principal, get_principal, issue_demo_token
 from app.config import settings
-from app.db import verify_connectivity
+from app.policy import gate
 from app.retrieval.rag import RetrievalMode, retryable_generation_error
 
 app = FastAPI(
@@ -32,6 +33,8 @@ app = FastAPI(
     description="Department-scoped RAG assistant (HR + Finance).",
     version="0.1.0",
 )
+
+app.add_middleware(PolicyAdmission)
 
 app.add_middleware(
     CORSMiddleware,
@@ -79,18 +82,15 @@ def health() -> dict[str, str]:
 
 @app.get("/ready")
 def ready(response: Response) -> dict[str, str]:
-    """Readiness probe: Neo4j is reachable.
-
-    Returns 200 with {"status": "ready", "neo4j": "ok"} on success.
-    Returns 503 with {"status": "not_ready", "neo4j": "down"} on failure.
-    503 (Service Unavailable) is the canonical status for "I'm alive
-    but can't serve traffic right now" — load balancers will stop
-    routing to this instance until it returns 200 again.
-    """
-    if verify_connectivity():
-        return {"status": "ready", "neo4j": "ok"}
+    """Readiness requires a readable, published policy gate, not just a live DB."""
+    try:
+        state = gate.snapshot()
+        if state.get("open") is True and not state.get("owner"):
+            return {"status": "ready", "neo4j": "ok"}
+    except Exception:
+        pass
     response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE
-    return {"status": "not_ready", "neo4j": "down"}
+    return {"status": "not_ready", "neo4j": "closed_or_unavailable"}
 
 
 class DemoTokenRequest(BaseModel):

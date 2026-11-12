@@ -13,6 +13,7 @@ from pydantic import BaseModel, Field
 
 from app.cache import get_cache
 from app.config import settings
+from app.policy import policy_revision
 from app.cache import normalize as cache_normalize
 from app.observability import langchain_config
 from app.retrieval.rag import (
@@ -502,7 +503,10 @@ def answer_question(
     cache = get_cache()
     use_cache = use_cache and settings.enable_semantic_cache
     cache_scope: frozenset[str] | None = (
-        None if groups is None else frozenset({*groups, f"\x00mode={mode}", f"\x00dept={department}"})
+        None if groups is None else frozenset({
+            *groups, f"\x00mode={mode}", f"\x00dept={department}",
+            f"\x00revision={policy_revision.get()}",
+        })
     )
     embedding = None
     if use_cache:
