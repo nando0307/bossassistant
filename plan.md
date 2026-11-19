@@ -748,9 +748,11 @@ Three design points:
    uses `nemotron-3-ultra-550b` and a local `BAAI/bge-reranker-large` (~1.5GB).
 3. **Fix the two routing defects above** (Known broken 1 and 2), then re-measure. This
    is a real, attributable improvement: 71/75 → 74/75 if both land.
-4. ~~Propagate upstream 5xx as 503~~ — **done.** `/ask` now maps provider
-   `502/503/504/ResourceExhausted` to 503 so the eval client's retry path engages;
-   genuine defects still surface as 500. Recovered 2 of 3 cases lost in one run.
+4. ~~Propagate upstream 5xx as 503~~ — **done.** `/ask` now maps transient
+   upstream provider failures to 503 so the eval client's retry path engages;
+   genuine defects still surface as 500. Classification lives in
+   `retryable_generation_error` (`src/app/retrieval/rag.py`) and the caller-facing
+   contract in README "Architecture". Recovered 2 of 3 cases lost in one run.
 5. ~~Nightly eval job~~ — **done, see "The CI eval gate" above.** (Original note:) A 75-case run takes ~5 minutes functionally;
    with the judge it is far longer. Nightly writing `results.jsonl` is both practical
    and more credible than blocking PRs.

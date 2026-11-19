@@ -169,6 +169,24 @@ def test_genuine_bug_still_returns_500(monkeypatch) -> None:  # type: ignore[no-
     assert response.status_code == 500
 
 
+def test_auth_retired_and_malformed_nvidia_errors_stay_500(monkeypatch: Any) -> None:
+    """Only the verified transient NVIDIA 500 signature is remapped."""
+    for message in (
+        "[401] Unauthorized",
+        "[410] Gone",
+        "[500] malformed response",
+        "[500] Internal Server Error\nmalformed response",
+    ):
+        def boom(*args: object, **kwargs: object) -> None:
+            raise Exception(message)
+
+        monkeypatch.setattr(main, "answer_question", boom)
+        response = TestClient(main.app, raise_server_exceptions=False).post(
+            "/ask", headers=auth_headers(), json={"question": "How much PTO do I accrue?"}
+        )
+        assert response.status_code == 500
+
+
 # ── Authentication ───────────────────────────────────────────────────
 
 
