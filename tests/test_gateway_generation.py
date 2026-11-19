@@ -93,15 +93,21 @@ def test_nvidia_embedding_http_failures_keep_ask_contract(monkeypatch: Any) -> N
 
         def do_POST(self) -> None:
             assert self.path == "/v1/embeddings"
-            self.send_response(state["status"])
-            self.send_header("Content-Type", "application/json")
-            self.end_headers()
+            # Drain the request body before replying. Closing with unread bytes in
+            # the socket buffer sends RST, which the HTTP client reports as a
+            # connection reset instead of the status we are here to assert on.
+            self.rfile.read(int(self.headers.get("Content-Length", 0)))
             payload = (
                 {"data": [{"embedding": [0.1, 0.2], "index": 0}], "model": "synthetic"}
                 if state["status"] == 200
                 else {"status": state["status"], "title": "Internal Server Error", "detail": "service inference failed"}
             )
-            self.wfile.write(json.dumps(payload).encode())
+            body = json.dumps(payload).encode()
+            self.send_response(state["status"])
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
 
     server = ThreadingHTTPServer(("127.0.0.1", 0), EmbeddingHandler)
     thread = threading.Thread(target=server.serve_forever, daemon=True)

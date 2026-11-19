@@ -308,8 +308,10 @@ Each generation call has the gateway's total budget (60 seconds by default), not
 one full budget per provider. Boss sets SDK retries to zero and a 65-second
 transport timeout. If the gateway budget changes, set `GENERATION_TIMEOUT_SECONDS`
 above it. A deep or multi-department question can make several generation calls,
-so this is not a total `/ask` deadline. Exhaustion or a transport outage returns
-HTTP 503; streaming sends `error` with `retryable:true`. After partial output,
+so this is not a total `/ask` deadline. Exhaustion, a transient upstream provider
+error, or a transport outage returns HTTP 503; streaming sends `error` with
+`retryable:true`. A non-transient upstream error - bad credentials, a retired
+model, a malformed response - still surfaces as 500. After partial output,
 never append a backup answer: discard the partial answer before retrying.
 Boss requires a normal completion marker before `done`, including abstentions.
 
@@ -325,7 +327,9 @@ Embeddings stay on NVIDIA `nvidia/llama-nemotron-embed-vl-1b-v2`, requested at
 judges remain direct NVIDIA jobs with their existing model arguments; they do
 not require gateway settings. Offline code invoking the shared graph query
 functions does use the new map/reduce gateway aliases.
-Provider fallback does not cover NVIDIA embedding or Neo4j outages.
+Provider fallback does not cover NVIDIA embedding or Neo4j outages: a transient
+embedding failure, such as NVIDIA's `service inference failed` 500, surfaces as
+the 503 above, and a non-transient one as a 500.
 
 When Langfuse is enabled, BossAssistant traces key LangChain runs:
 
