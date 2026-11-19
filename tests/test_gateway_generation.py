@@ -78,6 +78,66 @@ def gateway(monkeypatch: Any) -> Any:
         thread.join()
 
 
+
+def test_nvidia_embedding_http_failures_keep_ask_contract(monkeypatch: Any) -> None:
+    """The real NVIDIA SDK's untyped HTTP errors must map to /ask's 503 contract."""
+    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+    from langchain_nvidia_ai_endpoints import NVIDIAEmbeddings
+
+    state = {"status": 500}
+
+    class EmbeddingHandler(BaseHTTPRequestHandler):
+        def log_message(self, *args: Any) -> None:
+            pass
+
+        def do_POST(self) -> None:
+            assert self.path == "/v1/embeddings"
+            self.send_response(state["status"])
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+            payload = (
+                {"data": [{"embedding": [0.1, 0.2], "index": 0}], "model": "synthetic"}
+                if state["status"] == 200
+                else {"status": state["status"], "title": "Internal Server Error", "detail": "service inference failed"}
+            )
+            self.wfile.write(json.dumps(payload).encode())
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), EmbeddingHandler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    embedder = NVIDIAEmbeddings(model="synthetic", nvidia_api_key="local", base_url=f"http://127.0.0.1:{server.server_port}/v1")
+    monkeypatch.setattr(router, "get_embedder", lambda: embedder)
+    def answer_uncached(*args: Any, **kwargs: Any) -> dict[str, Any]:
+        embedder.embed_query("synthetic retrieval query")
+        return {"answer": "synthetic", "sources": [], "department_routed": "hr", "contexts": []}
+
+    monkeypatch.setattr(router, "_answer_question_uncached", answer_uncached)
+
+    client = TestClient(main.app)
+    payload = {"question": "What policy applies?", "department": "hr"}
+    try:
+        for cache_enabled in (True, False):
+            monkeypatch.setattr(settings, "enable_semantic_cache", cache_enabled)
+            response = client.post("/ask", headers=auth_headers(), json=payload)
+            assert response.status_code == 503
+            assert response.json()["detail"] == "upstream inference provider unavailable; retry"
+
+        state["status"] = 503
+        response = client.post("/ask", headers=auth_headers(), json=payload)
+        assert response.status_code == 503
+
+        state["status"] = 200
+        for cache_enabled in (True, False):
+            monkeypatch.setattr(settings, "enable_semantic_cache", cache_enabled)
+            response = client.post("/ask", headers=auth_headers(), json=payload)
+            assert response.status_code == 200
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join()
+
+
 def test_nightly_eval_supplies_gateway_configuration() -> None:
     workflow = yaml.safe_load((Path(__file__).resolve().parents[1] / ".github/workflows/nightly-eval.yml").read_text())
     env = workflow["jobs"]["eval"]["env"]
@@ -128,8 +188,9 @@ def test_complete_stream_preserves_answer_and_abstention(gateway: Any, text: str
     assert "".join(value for name, value in result if name == "token") == expected
 
 
-def test_exhaustion_survives_followup_rewrite_without_retry(gateway: Any) -> None:
-    gateway["status"] = 503
+@pytest.mark.parametrize("status", [500, 503])
+def test_exhaustion_survives_followup_rewrite_without_retry(gateway: Any, status: int) -> None:
+    gateway["status"] = status
     response = TestClient(main.app).post("/ask", headers=auth_headers(), json={"question": "What about contractors?", "department": "hr", "history": [{"role": "user", "content": "PTO policy?"}]})
     assert response.status_code == 503
     assert len(gateway["requests"]) == 1

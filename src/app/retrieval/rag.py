@@ -123,7 +123,10 @@ def retryable_generation_error(exc: Exception) -> bool:
         return exc.status_code in {408, 429, 500, 502, 503, 504}
     if isinstance(exc, APIError):
         return exc.code in {"stream_interrupted", "providers_exhausted", "generation_deadline"}
-    # The independent NVIDIA embedding SDK still raises untyped exceptions.
+    # Match the NVIDIA SDK's verified transient-500 message, not arbitrary 500s.
+    if str(exc).lstrip().startswith("[500] Internal Server Error\nservice inference failed"):
+        return True
+    # Other NVIDIA failures have historically been represented by these markers.
     return any(marker in str(exc) for marker in (
         "[502]", "[503]", "[504]", "ResourceExhausted", "Too Many Requests",
     ))
