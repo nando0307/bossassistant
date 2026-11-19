@@ -92,9 +92,10 @@ def ask(api_url: str, token: str, question: str, mode: str, attempts: int = 5) -
 
 
 def sync(graph, docs, splitter) -> dict:  # type: ignore[no-untyped-def]
-    from scripts.ingest import build_chunks, sync_department
+    from app.corpus import DOCUMENTS
+    from scripts.ingest import ingest_corpus
 
-    return sync_department(graph, "hr", build_chunks(docs, splitter))
+    return ingest_corpus(graph, {**DOCUMENTS, "hr": docs}, splitter)
 
 
 def main() -> int:

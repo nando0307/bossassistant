@@ -31,20 +31,3 @@ def get_driver() -> Driver:
         settings.neo4j_uri,
         auth=(settings.neo4j_user, settings.neo4j_password.get_secret_value()),
     )
-
-
-def verify_connectivity() -> bool:
-    """Run a trivial query to confirm Neo4j is reachable.
-
-    Returns True if Neo4j responds with the expected value, False otherwise.
-    Used by the /ready endpoint. Doesn't raise — readiness checks should
-    return a status, not a stack trace.
-    """
-    try:
-        driver = get_driver()
-        with driver.session(database=settings.neo4j_database) as session:
-            result = session.run("RETURN 1 AS n")
-            record = result.single()
-            return record is not None and record["n"] == 1
-    except Exception:
-        return False

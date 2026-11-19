@@ -31,3 +31,38 @@ def make_token(groups: list[str], subject: str = "test-user", **overrides: objec
 
 def auth_headers(groups: list[str] | None = None) -> dict[str, str]:
     return {"Authorization": f"Bearer {make_token(groups or ['all-employees'])}"}
+
+
+class MemoryAdmission:
+    """Transport tests substitute only shared storage, not response lifetimes."""
+
+    def __init__(self) -> None:
+        import threading
+        self.lock = threading.Lock()
+        self.open = True
+        self.revision = 1
+        self.active: set[str] = set()
+
+    def admit(self) -> tuple[str, int]:
+        from uuid import uuid4
+        from app.policy import PolicyUnavailable
+        with self.lock:
+            if not self.open:
+                raise PolicyUnavailable("closed")
+            ticket = str(uuid4())
+            self.active.add(ticket)
+            return ticket, self.revision
+
+    def check(self, ticket: str, revision: int) -> None:
+        from app.policy import PolicyUnavailable
+        with self.lock:
+            if ticket not in self.active or revision != self.revision:
+                raise PolicyUnavailable("lost registration")
+
+    def release(self, ticket: str) -> None:
+        with self.lock:
+            self.active.discard(ticket)
+
+    def snapshot(self) -> dict:
+        with self.lock:
+            return {"open": self.open, "active": list(self.active), "revision": self.revision}

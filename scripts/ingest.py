@@ -10,26 +10,27 @@ document gets revised, another is withdrawn, a third is re-worded. Re-running a
 create-only ingester either duplicates every chunk or forces a full wipe, and a
 full wipe throws away the GraphRAG entity graph built on top of these nodes.
 
-So chunks get a stable identity — `(source, chunk_idx)` — plus a `content_hash`:
+Chunks have stable `(source, chunk_idx)` identity and a text content hash:
 
-* unchanged chunk  -> skipped entirely, no embedding call, no write
-* changed chunk    -> re-embedded and updated in place
-* new chunk        -> created
-* chunk no longer produced by the corpus -> **deleted**
+* unchanged text and metadata -> no write or embedding
+* metadata-only change -> update properties, preserve embedding
+* changed/new text -> embed and upsert
+* chunk no longer in the corpus -> delete
 
 That last case is the one enterprises actually get bitten by. A withdrawn policy
 whose chunks linger is not a stale cache, it is an assistant citing a rule that
 no longer exists. Shortened documents hit the same path: if a document used to
 split into 4 chunks and now splits into 2, chunks 2 and 3 are orphans.
 
-Re-running with no corpus change writes nothing. `tests/test_ingest.py` asserts
-that, because "idempotent" is a claim that rots silently.
+Every write runs inside a shared, drained maintenance window. Publication follows
+full corpus verification; failures leave admission closed until a verified retry.
 """
 from __future__ import annotations
 
 import argparse
 import hashlib
 from dataclasses import dataclass
+import logging
 from typing import Any
 
 from langchain_neo4j import Neo4jGraph
@@ -37,6 +38,7 @@ from langchain_text_splitters import RecursiveCharacterTextSplitter
 
 from app.config import settings
 from app.corpus import DOCUMENTS
+from app.policy import gate
 from app.retrieval.rag import EMBEDDING_DIMENSIONS, INDEX_CONFIG, Department, get_embedder
 
 #: Declared here because the vector index must be created with the right width
@@ -65,6 +67,7 @@ def connect() -> Neo4jGraph:
         username=settings.neo4j_user,
         password=settings.neo4j_password.get_secret_value(),
         database=settings.neo4j_database,
+        refresh_schema=False,
     )
 
 
@@ -88,6 +91,16 @@ def build_chunks(docs: list[Any], splitter: RecursiveCharacterTextSplitter) -> l
                 )
             )
     return chunks
+
+
+def metadata_properties(chunk: Chunk) -> dict[str, Any]:
+    return {
+        "title": chunk.metadata.get("title"),
+        "department": chunk.metadata.get("department"),
+        "acl_groups": sorted(set(chunk.metadata.get("acl_groups") or [])),
+        "effective_date": chunk.metadata.get("effective_date"),
+        "superseded_by": chunk.metadata.get("superseded_by"),
+    }
 
 
 def ensure_indexes(graph: Neo4jGraph, department: Department) -> None:
@@ -123,7 +136,8 @@ def existing_chunks(graph: Neo4jGraph, department: Department) -> list[dict[str,
     label = INDEX_CONFIG[department]["node_label"]
     return graph.query(
         f"MATCH (c:{label}) RETURN elementId(c) AS element_id, c.source AS source, "
-        "c.chunk_idx AS chunk_idx, coalesce(c.content_hash, '') AS content_hash"
+        "c.chunk_idx AS chunk_idx, coalesce(c.content_hash, '') AS content_hash, "
+        "properties(c) AS properties"
     )
 
 
@@ -133,25 +147,38 @@ def sync_department(
     chunks: list[Chunk],
     dry_run: bool = False,
     embedder: Any | None = None,
+    *,
+    maintenance: str | None = None,
 ) -> dict[str, int]:
     """Bring one department's chunks in line with the corpus. Returns a diff.
 
     `embedder` is injected so the diff logic can be tested without a live
     endpoint; production passes None and gets the configured embedder.
     """
+    if not dry_run and (maintenance is None or not gate.drained(maintenance)):
+        raise RuntimeError("Ingestion requires an owned, drained maintenance window")
     label = INDEX_CONFIG[department]["node_label"]
-    ensure_indexes(graph, department)
+    if not dry_run:
+        ensure_indexes(graph, department)
 
     rows = existing_chunks(graph, department)
     wanted = {chunk.key: chunk for chunk in chunks}
+    if len(wanted) != len(chunks):
+        raise ValueError("Duplicate source/chunk identity in corpus")
     before = {
-        (row["source"], row["chunk_idx"]): row["content_hash"]
+        (row["source"], row["chunk_idx"]): row
         for row in rows
         if row["source"] is not None and row["chunk_idx"] is not None
     }
-
-    upserts = [c for c in chunks if before.get(c.key) != c.content_hash]
-    unchanged = len(chunks) - len(upserts)
+    if len(before) != sum(row["source"] is not None and row["chunk_idx"] is not None for row in rows):
+        raise ValueError("Duplicate chunks in graph; repair while serving is closed")
+    upserts = [c for c in chunks if before.get(c.key, {}).get("content_hash") != c.content_hash]
+    metadata_updates = [
+        c for c in chunks
+        if c.key in before and before[c.key]["content_hash"] == c.content_hash
+        and any(before[c.key].get("properties", {}).get(k) != v for k, v in metadata_properties(c).items())
+    ]
+    unchanged = len(chunks) - len(upserts) - len(metadata_updates)
     orphans = [
         row["element_id"]
         for row in rows
@@ -164,6 +191,7 @@ def sync_department(
         "new": sum(1 for c in upserts if c.key not in before),
         "changed": sum(1 for c in upserts if c.key in before),
         "deleted": len(orphans),
+        "metadata_changed": len(metadata_updates),
     }
     if dry_run:
         return stats
@@ -178,11 +206,7 @@ def sync_department(
                 "text": c.text,
                 "content_hash": c.content_hash,
                 "embedding": vector,
-                "title": c.metadata.get("title"),
-                "department": c.metadata.get("department"),
-                "acl_groups": list(c.metadata.get("acl_groups") or []),
-                "effective_date": c.metadata.get("effective_date"),
-                "superseded_by": c.metadata.get("superseded_by"),
+                **metadata_properties(c),
             }
             for c, vector in zip(upserts, vectors, strict=True)
         ]
@@ -202,6 +226,17 @@ def sync_department(
             {"rows": payload},
         )
 
+    if metadata_updates:
+        graph.query(
+            f"UNWIND $rows AS row "
+            f"MATCH (c:{label} {{source: row.source, chunk_idx: row.chunk_idx}}) "
+            "SET c += row.metadata",
+            {"rows": [
+                {"source": c.source, "chunk_idx": c.chunk_idx, "metadata": metadata_properties(c)}
+                for c in metadata_updates
+            ]},
+        )
+
     if orphans:
         # DETACH: these chunks carry MENTIONS edges into the GraphRAG entity
         # graph. Deleting the node without its relationships would fail, and
@@ -216,6 +251,69 @@ def sync_department(
         )
 
     return stats
+
+
+def verify_corpus(graph: Neo4jGraph, corpus: dict[Department, list[Chunk]]) -> None:
+    """Compare stored text, every served property and embeddings, not just hashes."""
+    for department, chunks in corpus.items():
+        rows = existing_chunks(graph, department)
+        expected = {c.key: c for c in chunks}
+        if len(rows) != len(expected):
+            raise RuntimeError(f"{department}: corpus cardinality mismatch")
+        seen = set()
+        for row in rows:
+            key = (row["source"], row["chunk_idx"])
+            chunk = expected.get(key)
+            if chunk is None or key in seen:
+                raise RuntimeError(f"{department}: unexpected or duplicate chunk {key}")
+            seen.add(key)
+            props = row["properties"]
+            if props.get("text") != chunk.text or props.get("content_hash") != chunk.content_hash:
+                raise RuntimeError(f"{department}: text mismatch for {key}")
+            if any(props.get(k) != v for k, v in metadata_properties(chunk).items()):
+                raise RuntimeError(f"{department}: metadata mismatch for {key}")
+            vector = props.get("embedding")
+            if not isinstance(vector, list) or len(vector) != EMBEDDING_DIMENSIONS:
+                raise RuntimeError(f"{department}: missing/invalid embedding for {key}")
+    graph.query("CALL db.awaitIndexes(300)")
+
+
+def ingest_corpus(
+    graph: Neo4jGraph,
+    documents: dict[Department, list[Any]],
+    splitter: RecursiveCharacterTextSplitter,
+    *,
+    embedder: Any | None = None,
+    reset: bool = False,
+    drain_timeout: float = 300,
+    recover_stopped_workers: str | None = None,
+) -> dict[str, int]:
+    """The only publication path: close, drain, synchronize, verify, publish."""
+    if set(documents) != set(INDEX_CONFIG):
+        raise ValueError("Publication requires the complete HR and Finance corpus")
+    corpus = {department: build_chunks(docs, splitter) for department, docs in documents.items()}
+    owner = gate.close(recover_stopped_workers)
+    print(f"Serving CLOSED; maintenance cycle: {owner}", flush=True)
+    try:
+        gate.drain(owner, drain_timeout)
+        if reset:
+            # Never erase the gate, its closed status or active registrations.
+            graph.query("MATCH (n) WHERE NOT n:PolicyGate DETACH DELETE n")
+        totals: dict[str, int] = {}
+        for department, chunks in corpus.items():
+            stats = sync_department(graph, department, chunks, embedder=embedder, maintenance=owner)
+            for metric, value in stats.items():
+                totals[metric] = totals.get(metric, 0) + value
+        verify_corpus(graph, corpus)
+        revision = gate.publish(owner)
+        print(f"Verified corpus published at revision {revision}; serving OPEN", flush=True)
+        return totals
+    except BaseException:
+        try:
+            gate.fail(owner)
+        except Exception:
+            logging.exception("Maintenance state uncertain; do not resume serving without recovery")
+        raise
 
 
 def main() -> None:
@@ -233,35 +331,27 @@ def main() -> None:
     )
     parser.add_argument("--chunk-size", type=int, default=500)
     parser.add_argument("--chunk-overlap", type=int, default=100)
+    parser.add_argument("--drain-timeout", type=float, default=300)
+    parser.add_argument(
+        "--recover-stopped-workers",
+        metavar="CLOSED_CYCLE",
+        help="Recover abandoned registrations ONLY after stopping all old API and ingestion processes. "
+        "Requires the exact closed maintenance cycle printed by the failed run.",
+    )
     args = parser.parse_args()
 
     graph = connect()
-    if args.reset and not args.dry_run:
-        existing = graph.query("MATCH (n) RETURN count(n) AS count")[0]["count"]
-        if existing:
-            graph.query("MATCH (n) DETACH DELETE n")
-            print(f"Cleared {existing} existing nodes.")
-
     splitter = RecursiveCharacterTextSplitter(
         chunk_size=args.chunk_size, chunk_overlap=args.chunk_overlap
     )
-    totals: dict[str, int] = {}
-    for department, docs in DOCUMENTS.items():
-        chunks = build_chunks(docs, splitter)
-        stats = sync_department(graph, department, chunks, dry_run=args.dry_run)
-        name = INDEX_CONFIG[department]["department_name"]
-        print(
-            f"{name}: {len(docs)} documents -> {stats['total']} chunks "
-            f"(new {stats['new']}, changed {stats['changed']}, "
-            f"unchanged {stats['unchanged']}, deleted {stats['deleted']})"
-        )
-        for metric, value in stats.items():
-            totals[metric] = totals.get(metric, 0) + value
-
-    wrote = totals["new"] + totals["changed"] + totals["deleted"]
-    print(f"{'would write' if args.dry_run else 'wrote'} {wrote} change(s)")
-    if wrote == 0:
-        print("corpus and graph are in sync; nothing to do")
+    if args.dry_run:
+        for department, docs in DOCUMENTS.items():
+            print(department, sync_department(graph, department, build_chunks(docs, splitter), dry_run=True))
+        return
+    print(ingest_corpus(
+        graph, DOCUMENTS, splitter, reset=args.reset, drain_timeout=args.drain_timeout,
+        recover_stopped_workers=args.recover_stopped_workers,
+    ))
 
 
 if __name__ == "__main__":

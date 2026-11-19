@@ -513,7 +513,7 @@ Generated eval output is written to `evals/results.jsonl` and is intentionally g
 
 | script | purpose |
 |---|---|
-| `scripts/ingest.py` | Incremental corpus ingest. Content-hashed, deletes orphans, `--dry-run` shows the diff without writing or embedding. |
+| `scripts/ingest.py` | Controlled maintenance ingestion: close admission, drain all policy work, sync text and metadata, verify, publish a new cache revision. |
 | `scripts/graph_index.py` | Build the GraphRAG entity graph: extract, resolve, cluster, summarise, embed. Staged and resumable. |
 | `scripts/mint_token.py` | Mint a dev JWT for a set of groups. |
 | `scripts/run_eval.py` | Run the eval suite against a live API, optionally RAGAS-scored. |
@@ -521,12 +521,73 @@ Generated eval output is written to `evals/results.jsonl` and is intentionally g
 | `scripts/measure_acl_recall.py` | Price the recall cost of post-ANN ACL filtering against exact cosine. |
 | `scripts/injection_drill.py` | Plant a hostile policy document, verify the assistant ignores it, remove it. |
 
-Re-running `ingest.py` with no corpus change writes nothing:
+Preview the diff without closing admission, writing indexes, or embedding:
 
 ```bash
 uv run python scripts/ingest.py --dry-run
-# HR: 39 documents -> 73 chunks (new 0, changed 0, unchanged 73, deleted 0)
 ```
+
+### Policy maintenance and recovery
+
+All API workers and the ingester must use the **same Neo4j database**. Missing,
+unreadable, or closed gate state returns 503 on `/ask` and `/ask/stream`; `/health`
+remains live and `/ready` reports not ready. First deployment starts closed until
+a successful ingest initializes and verifies the corpus.
+
+```bash
+uv run python scripts/ingest.py --drain-timeout 300
+```
+
+This closes shared admission atomically with request registration, then waits for
+registered JSON responses and SSE streams to finish, including generation that
+continues after HTTP disconnect. Only then does it modify policy data. ACL,
+supersession, title, department, and effective-date changes update metadata without
+re-embedding unchanged text. Removed chunks are deleted. Verification compares all
+stored chunks, text, metadata, embedding dimensions and index readiness against the
+complete intended corpus before publication reopens serving.
+
+Publication advances a shared cache revision. Every admitted request uses that
+revision, so pre-maintenance answers cannot be reused by an idle or restarted
+worker. This is a **maintenance outage**, not zero-downtime publication: a policy
+revision becomes effective at verified publication, not when source files are
+edited or while already-admitted old responses are draining. Out-of-band Neo4j
+writes bypass this protocol and are not supported.
+
+Any synchronization, verification or drain failure leaves serving closed. A normal
+failed ingestion can be repaired and rerun. `--reset` also preserves the gate and
+requires the same drain and verification; it deletes the corpus and derived graph,
+not the maintenance state.
+
+**Crashed or unreachable workers:** registrations do not expire on a heartbeat
+timeout. A paused/partitioned process may still be generating; treating it as dead
+would falsely report drain. To recover abandoned registrations or an ingester
+killed while owning maintenance:
+
+1. Stop **all** old API and ingestion processes, including disconnected or
+   partitioned instances. Confirm they cannot resume; merely losing their HTTP
+   connection is insufficient.
+2. Read the current closed cycle and active registrations:
+   `MATCH (g:PolicyGate {key: 'corpus'}) RETURN g.open, g.cycle, g.owner, g.active`.
+   If still open, run ingestion to close admission; a blocked drain prints its cycle.
+3. Repair the corpus/environment, then run
+   `uv run python scripts/ingest.py --recover-stopped-workers <closed-cycle>`.
+   This explicit stopped-process attestation clears abandoned registrations and
+   ownership. It still synchronizes and verifies the entire corpus before opening.
+4. Restart API workers and check `/ready`. An API restart alone never opens a
+   closed gate. Never delete or manually open the gate to restore service.
+
+Live concurrency/recovery regression proof uses a **disposable database only**:
+
+```bash
+BOSS_POLICY_TEST_URI=bolt://127.0.0.1:17687 uv run pytest tests/test_policy_live.py -v
+```
+
+These tests delete the supplied database's nodes, run separate API processes,
+kill a test worker, and exercise JSON/SSE, revision caches, metadata revocation,
+supersession, partial writes, verification failure and stopped-worker recovery.
+Inference and embedding values are deterministic substitutes; the HTTP servers
+and Neo4j transactions are real. Hosted Aura compatibility must also be verified
+in an isolated Aura database before claiming it from a local Neo4j run.
 
 ## Development Checks
 

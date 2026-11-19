@@ -368,14 +368,16 @@ Chunks have a stable identity — `(source, chunk_idx)` — plus a `content_hash
 
 | state | action |
 |---|---|
-| unchanged | skipped entirely: no embedding call, no write |
-| changed | re-embedded, updated in place |
+| unchanged text and metadata | no chunk write or embedding |
+| metadata only | update ACL/supersession and other served properties, preserve embedding |
+| changed text | re-embedded, updated in place |
 | new | created |
 | no longer produced by the corpus | **deleted** |
 
-**Idempotency is asserted, not claimed.** Second run over an unchanged corpus:
-`146 unchanged, 0 writes, 0 embedding calls`. `tests/test_ingest.py` pins it with a fake
-graph so it keeps running without Aura credentials.
+**Idempotency is asserted, not claimed.** A second run over an unchanged corpus
+writes no chunks and makes no embedding calls. Maintenance state and publication
+revision still advance. `tests/test_ingest.py` covers the diff without Aura credentials;
+`tests/test_policy_live.py` exercises real transactions and multi-worker recovery.
 
 Three subtleties that cost real incidents:
 
@@ -648,10 +650,11 @@ Two deliberate conservatisms, both costing hit rate:
   though it would be safe. The alternative is a correctness argument that must hold for
   every group added later, and getting it wrong is silent.
 
-Ceilings, stated rather than discovered later: in-process, so hit rate falls as workers
-scale (Redis is the upgrade), and entries expire on TTL rather than on corpus change, so
-a re-ingest leaves stale answers for up to the TTL — `invalidate_all()` exists and
-`scripts/ingest.py` should call it once this is deployed anywhere real.
+The cache remains in-process, so hit rate falls as workers scale. API partitions now
+include the shared verified publication revision; a maintenance update makes old
+answers unreachable across workers rather than waiting for TTL expiry. Admission
+and durable active-work registration live in Neo4j. See README's maintenance
+procedure for fail-closed updates and stopped-worker recovery.
 
 ### Cost accounting
 

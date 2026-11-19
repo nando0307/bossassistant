@@ -20,10 +20,11 @@ correctness argument that has to hold for every future group, and getting it
 wrong is silent.
 
 **Ceilings.** In-process, so each worker keeps its own copy and hit rate falls
-as workers scale; a shared Redis is the upgrade. Entries expire on a TTL rather
-than on corpus change, so re-ingesting a revised policy leaves stale answers
-served for up to the TTL — `invalidate_all()` is what `scripts/ingest.py` should
-call once this is deployed anywhere real.
+as workers scale. API requests include the shared published policy revision in
+their partition key, which is the sole freshness authority: an old answer is
+unreachable immediately after publication, including in workers that were idle
+during maintenance. Expired partitions are pruned on the next write, so
+retention stays bounded no matter how many revisions are published.
 """
 from __future__ import annotations
 
@@ -120,6 +121,11 @@ class SemanticCache:
         key = partition_key(groups)
         now = time.monotonic()
         with self._lock:
+            for stale_key in [
+                partition for partition, entries in self._partitions.items()
+                if not self._fresh(entries, now)
+            ]:
+                del self._partitions[stale_key]
             entries = self._fresh(self._partitions.get(key, []), now)
             entries.append(
                 CacheEntry(embedding=embedding, question=question, payload=dict(payload), created=now)
@@ -133,7 +139,12 @@ class SemanticCache:
             self.stats.partitions = len(self._partitions)
 
     def invalidate_all(self) -> None:
-        """Drop everything. Call after the corpus changes."""
+        """Drop everything. For tests and offline tooling only.
+
+        Serving does not call this: the published policy revision in the
+        partition key already makes pre-publication answers unreachable in
+        every worker, without a broadcast.
+        """
         with self._lock:
             self._partitions.clear()
             self.stats.partitions = 0
